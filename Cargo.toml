@@ -1,11 +1,11 @@
 [package]
-version = "0.1.0"
-rust-version = "1.81.0"
-edition = "2021"
-
 name = "arcaea"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81.0"
 authors = ["Charlie"]
-description = "A Rust Console Ascii Editor App <3"
+description = "A Rust Console Ascii Editor App"
+license = "MIT"
 
 [dependencies]
 crossterm = "0.28.1"

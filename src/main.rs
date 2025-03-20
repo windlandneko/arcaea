@@ -8,7 +8,10 @@ fn main() -> Result<(), Error> {
             println!("arcaea {}", env!("VERSION_INFO"))
         }
         (Some(arg), 0) if arg.starts_with('-') => return Err(Error::UnrecognizedOption(arg)),
-        (filename, 0) => todo!("parse file: {:?}", filename),
+
+        (None, 0) => todo!("new file"),
+        (Some(filename), 0) => todo!("parse file: {:?}", filename),
+
         (_, n_remaining_args) => return Err(Error::TooManyArguments(n_remaining_args + 1)),
     }
     Ok(())
