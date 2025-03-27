@@ -4,15 +4,15 @@ fn commit_info_from_git() -> Option<String> {
     Command::new("git")
         .args([
             "log",
-            "-1",
             "--date=short",
             "--format= (%h %cd)",
             "--abbrev=8",
+            "HEAD",
         ])
         .output()
         .ok()
         .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
 }
 
 fn main() {
