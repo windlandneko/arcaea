@@ -5,7 +5,6 @@ pub enum Error {
     TooManyArguments(usize),
     Io(std::io::Error),
     Fmt(std::fmt::Error),
-    Config(std::path::PathBuf, usize, String),
 }
 
 // Provides detailed and user-friendly error messages for debugging purposes.
@@ -18,11 +17,7 @@ impl fmt::Debug for Error {
             }
             Error::Io(error) => write!(f, "File IO error: {}", error),
             Error::Fmt(error) => write!(f, "Format error: {}", error),
-            Error::Config(msg, count, context) => write!(
-                f,
-                "Config error: {} (count: {}, context: {})",
-                msg.display(), count, context
-            ),
+            // _ => write!(f, "An unknown error occurred."),
         }
     }
 }

@@ -1,4 +1,4 @@
-use arcaea::{config::Config, editor::Editor, error::Error};
+use arcaea::{Editor, Error};
 use crossterm::style::Stylize;
 
 fn main() -> Result<(), Error> {
@@ -11,7 +11,7 @@ fn main() -> Result<(), Error> {
         (Some(arg), 0) if arg == "-h" || arg == "--help" => print_help_message(),
         (Some(arg), 0) if arg.starts_with('-') => return Err(Error::UnrecognizedOption(arg)),
 
-        (filename, 0) => Editor::new(Config::load()?)?.run(&filename)?,
+        (filename, 0) => Editor::new().init(&filename)?,
 
         (_, n_remaining_args) => return Err(Error::TooManyArguments(n_remaining_args + 1)),
     }
@@ -31,16 +31,14 @@ fn print_help_message() {
     println!();
     println!("{}", "Options:".bold().green());
     println!(
-        "  {}, {}{}",
+        "  {}, {}Print version info and exit",
         "-v".bold().cyan(),
-        format!("{:<12}", "--version").bold().cyan(),
-        "Print version info and exit"
+        format!("{:<12}", "--version").bold().cyan()
     );
     println!(
-        "  {}, {}{}",
+        "  {}, {}Print help",
         "-h".bold().cyan(),
-        format!("{:<12}", "--help").bold().cyan(),
-        "Print help"
+        format!("{:<12}", "--help").bold().cyan()
     );
     println!();
 }

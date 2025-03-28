@@ -1,6 +1,5 @@
-pub mod config;
-pub mod editor;
-pub mod error;
-pub mod row;
-pub mod syntax;
-pub mod terminal;
+mod editor;
+mod error;
+mod row;
+
+pub use {editor::Editor, error::Error, row::Row};
