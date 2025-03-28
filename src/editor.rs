@@ -1,14 +1,16 @@
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind},
     execute, queue,
     style::{self, Stylize},
     terminal,
 };
 use std::io::{self, Write};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::{Error, Row};
+use crate::{Error, Row, Tui};
+
+const EXTRA_GAP: usize = 3;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Position {
@@ -18,6 +20,8 @@ pub struct Position {
 
 #[derive(Default)]
 pub struct Editor {
+    filename: Option<String>,
+
     buffer: Vec<Row>,
     debug_output: String,
     height: usize,
@@ -27,6 +31,8 @@ pub struct Editor {
 
     offset: Position,
     cursor: Position,
+
+    changed: bool,
 }
 
 impl Editor {
@@ -41,6 +47,8 @@ impl Editor {
     pub fn init(&mut self, filename: &Option<String>) -> Result<(), Error> {
         let mut stdout = io::stdout();
 
+        self.filename = filename.clone();
+
         if let Some(name) = filename {
             self.buffer = std::fs::read_to_string(name)?
                 .split('\n')
@@ -54,8 +62,8 @@ impl Editor {
         terminal::enable_raw_mode()?;
         execute!(
             stdout,
-            // terminal::EnterAlternateScreen,
-            // terminal::DisableLineWrap,
+            terminal::EnterAlternateScreen,
+            terminal::DisableLineWrap,
             event::EnableMouseCapture,
             event::EnableBracketedPaste,
             event::EnableFocusChange,
@@ -76,107 +84,170 @@ impl Editor {
         loop {
             if event::poll(std::time::Duration::from_millis(100))? {
                 match event::read()? {
-                    Event::Key(event) => match event.code {
-                        KeyCode::Esc => {
-                            // TODO: Confirm exit
-                            break;
-                        }
-
-                        KeyCode::Down => {
-                            if self.cursor.y < self.buffer.len() - 1 {
-                                self.cursor.y += 1;
-                            } else {
-                                self.cursor.x = self.get_width();
+                    Event::Key(event) => match (event.modifiers, event.code) {
+                        (KeyModifiers::CONTROL, KeyCode::Char('s')) => self.save_file()?,
+                        (_, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
+                            match Tui::confirm_exit(self.changed)? {
+                                Some(true) => {
+                                    self.save_file()?;
+                                    break;
+                                }
+                                Some(false) => {
+                                    break;
+                                }
+                                None => {}
                             }
                         }
-                        KeyCode::Up => {
-                            if self.cursor.y > 0 {
-                                self.cursor.y -= 1;
-                            } else {
-                                self.cursor.x = 0;
+                        (KeyModifiers::NONE, code) => {
+                            match code {
+                                KeyCode::Up => {
+                                    if self.cursor.y > 0 {
+                                        self.cursor.y -= 1;
+                                    } else {
+                                        self.cursor.x = 0;
+                                    }
+                                }
+                                KeyCode::Down => {
+                                    if self.cursor.y < self.buffer.len() - 1 {
+                                        self.cursor.y += 1;
+                                    } else {
+                                        self.cursor.x = self.get_width();
+                                    }
+                                }
+                                KeyCode::Left => {
+                                    self.cursor.x = self.cursor.x.min(self.get_width());
+                                    if self.cursor.x > 0 {
+                                        self.cursor.x -= 1;
+                                    } else if self.cursor.y > 0 {
+                                        self.cursor.y -= 1;
+                                        self.cursor.x = self.get_width();
+                                    }
+                                }
+                                KeyCode::Right => {
+                                    self.cursor.x = self.cursor.x.min(self.get_width());
+                                    if self.cursor.x < self.get_width() {
+                                        self.cursor.x += 1;
+                                    } else if self.cursor.y < self.buffer.len() - 1 {
+                                        self.cursor.y += 1;
+                                        self.cursor.x = 0;
+                                    }
+                                }
+
+                                KeyCode::PageUp => {
+                                    self.cursor.y = self.cursor.y.saturating_sub(self.height - 2);
+                                }
+                                KeyCode::PageDown => {
+                                    self.cursor.y = (self.cursor.y + self.height - 2)
+                                        .min(self.buffer.len() - 1);
+                                }
+                                KeyCode::Home => {
+                                    self.cursor.x = 0;
+                                }
+                                KeyCode::End => {
+                                    self.cursor.x = self.get_width();
+                                }
+
+                                KeyCode::Enter => {
+                                    self.changed = true;
+
+                                    let new_line = Row {
+                                        rope: self.buffer[self.cursor.y].rope[self.cursor.x..]
+                                            .to_vec(),
+                                    };
+                                    self.buffer.insert(self.cursor.y + 1, new_line);
+                                    self.buffer[self.cursor.y] = Row {
+                                        rope: self.buffer[self.cursor.y].rope[..self.cursor.x]
+                                            .to_vec(),
+                                    };
+                                    self.cursor.y += 1;
+                                    self.cursor.x = 0;
+                                }
+
+                                KeyCode::Backspace => {
+                                    self.changed = true;
+
+                                    if self.cursor.x > 0 {
+                                        self.cursor.x -= 1;
+                                        self.buffer[self.cursor.y].rope.remove(self.cursor.x);
+                                    } else if self.cursor.y > 0 {
+                                        self.cursor.y -= 1;
+                                        self.cursor.x = self.get_width();
+                                        let mut rope = self.buffer[self.cursor.y].rope.clone();
+                                        rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
+                                        self.buffer[self.cursor.y] = Row { rope };
+                                    }
+                                }
+                                KeyCode::Delete => {
+                                    self.changed = true;
+
+                                    if self.cursor.x < self.get_width() {
+                                        self.buffer[self.cursor.y].rope.remove(self.cursor.x);
+                                    } else if self.cursor.y < self.buffer.len() - 1 {
+                                        let mut rope = self.buffer[self.cursor.y].rope.clone();
+                                        rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
+                                        self.buffer[self.cursor.y] = Row { rope };
+                                    }
+                                }
+
+                                KeyCode::Char(c) => {
+                                    self.changed = true;
+
+                                    self.buffer[self.cursor.y].rope.insert(
+                                        self.cursor.x,
+                                        (c.to_string(), c.width().unwrap_or(0)),
+                                    );
+                                    self.cursor.x += 1;
+                                }
+
+                                _ => {}
                             }
-                        }
-                        KeyCode::Left => {
-                            self.cursor.x = self.cursor.x.min(self.get_width());
-                            if self.cursor.x > 0 {
-                                self.cursor.x -= 1;
-                            } else if self.cursor.y > 0 {
-                                self.cursor.y -= 1;
-                                self.cursor.x = self.get_width();
-                            }
-                        }
-                        KeyCode::Right => {
-                            self.cursor.x = self.cursor.x.min(self.get_width());
-                            if self.cursor.x < self.get_width() {
-                                self.cursor.x += 1;
-                            } else if self.cursor.y < self.buffer.len() - 1 {
-                                self.cursor.y += 1;
-                                self.cursor.x = 0;
-                            }
-                        }
-
-                        KeyCode::PageUp => {
-                            self.cursor.y = self.cursor.y.saturating_sub(self.height - 2);
-                        }
-                        KeyCode::PageDown => {
-                            self.cursor.y =
-                                (self.cursor.y + self.height - 2).min(self.buffer.len() - 1);
-                        }
-                        KeyCode::Home => {
-                            self.cursor.x = 0;
-                        }
-                        KeyCode::End => {
-                            self.cursor.x = self.get_width();
-                        }
-
-                        KeyCode::Enter => {
-                            let new_line = Row {
-                                rope: self.buffer[self.cursor.y].rope[self.cursor.x..].to_vec(),
-                            };
-                            self.buffer.insert(self.cursor.y + 1, new_line);
-                            self.buffer[self.cursor.y] = Row {
-                                rope: self.buffer[self.cursor.y].rope[..self.cursor.x].to_vec(),
-                            };
-                            self.cursor.y += 1;
-                            self.cursor.x = 0;
-                        }
-
-                        KeyCode::Backspace => {
-                            if self.cursor.x > 0 {
-                                self.cursor.x -= 1;
-                                self.buffer[self.cursor.y].rope.remove(self.cursor.x);
-                            } else if self.cursor.y > 0 {
-                                self.cursor.y -= 1;
-                                self.cursor.x = self.get_width();
-
-                                let mut rope = self.buffer[self.cursor.y].rope.clone();
-                                rope.extend(self.buffer.remove(self.cursor.y).rope);
-                                self.buffer[self.cursor.y] = Row { rope };
-                            }
-                        }
-
-                        KeyCode::Delete => {
-                            if self.cursor.x < self.get_width() {
-                                self.buffer[self.cursor.y].rope.remove(self.cursor.x);
-                            } else if self.cursor.y < self.buffer.len() - 1 {
-                                let mut rope = self.buffer[self.cursor.y].rope.clone();
-                                rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
-                                self.buffer[self.cursor.y] = Row { rope };
-                            }
-                        }
-
-                        KeyCode::Char(c) => {
-                            self.buffer[self.cursor.y]
-                                .rope
-                                .insert(self.cursor.x, (c.to_string(), c.width().unwrap_or(0)));
-                            self.cursor.x += 1;
+                            self.update_offset();
                         }
 
                         _ => {}
                     },
-                    Event::Mouse(event) => {
-                        // TODO: Handle mouse events
-                    }
+                    Event::Mouse(event) => match event.kind {
+                        MouseEventKind::ScrollUp => {
+                            self.offset.y = self.offset.y.saturating_sub(3);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            self.offset.y = (self.offset.y + 3).min(
+                                (self.buffer.len() + EXTRA_GAP).saturating_sub(self.height - 2),
+                            );
+                        }
+                        MouseEventKind::ScrollLeft => {
+                            self.offset.x = self.offset.x.saturating_sub(3);
+                        }
+                        MouseEventKind::ScrollRight => {
+                            self.offset.x =
+                                (self.offset.x + 3).min(self.get_width() + EXTRA_GAP + 1);
+                        }
+
+                        MouseEventKind::Down(btn) => match btn {
+                            MouseButton::Left => {
+                                if event.row < self.height as u16 - 2 {
+                                    self.cursor.y = event.row as usize + self.offset.y;
+                                    let x =
+                                        (event.column as usize).saturating_sub(self.sidebar_width);
+
+                                    let mut width = 0;
+                                    for (i, cell) in
+                                        self.buffer[self.cursor.y].rope.iter().enumerate()
+                                    {
+                                        if width + cell.1 / 2 >= x {
+                                            self.cursor.x = i;
+                                            break;
+                                        }
+                                        width += cell.1;
+                                    }
+                                }
+                            }
+
+                            _ => {}
+                        },
+
+                        _ => {}
+                    },
 
                     Event::Resize(width, height) => {
                         (self.height, self.width) = (height as usize, width as usize);
@@ -187,8 +258,6 @@ impl Editor {
                 if self.width < 5 || self.height < 5 {
                     continue;
                 }
-
-                self.update_offset();
 
                 let c = self.get_cursor_position();
                 self.debug_output = format!(
@@ -224,20 +293,24 @@ impl Editor {
 
         // draw statusbar
         {
-            let content_left = format!("");
-            let content_right = format!(" {} | {}", cursor.x, cursor.y);
+            let content_left = format!(" {}", self.filename.as_deref().unwrap_or("Untitled"));
+            let content_left = if self.changed {
+                format!("{} (未保存)", content_left)
+            } else {
+                content_left
+            };
+            let content_right = format!("行 {}，列 {} ", cursor.x, cursor.y);
             queue!(
                 stdout,
                 cursor::MoveTo(0, self.height.saturating_sub(2) as u16),
                 style::Print(
                     format!(
-                        "{:<padding$}{}",
+                        "{}{}{}",
                         content_left,
+                        " ".repeat(self.width - content_left.width() - content_right.width() - 1),
                         content_right,
-                        padding = self.width - content_right.len() - 1
                     )
-                    .white()
-                    .on_grey()
+                    .reverse()
                 )
             )?;
         }
@@ -297,15 +370,15 @@ impl Editor {
             }
         }
 
-        execute!(
-            stdout,
-            cursor::MoveTo(
-                (cursor.x - self.offset.x + self.sidebar_width + 1) as u16,
-                (cursor.y - self.offset.y) as u16
-            ),
-            cursor::Show,
-            terminal::EndSynchronizedUpdate
-        )?;
+        let (x, y) = (
+            cursor.x as isize - self.offset.x as isize + self.sidebar_width as isize + 1,
+            cursor.y as isize - self.offset.y as isize,
+        );
+
+        if x >= 0 && x < self.width as isize && y >= 0 && y < self.height as isize {
+            execute!(stdout, cursor::MoveTo(x as u16, y as u16), cursor::Show)?;
+        }
+        execute!(stdout, terminal::EndSynchronizedUpdate)?;
         Ok(())
     }
 
@@ -334,8 +407,6 @@ impl Editor {
     }
 
     fn update_offset(&mut self) {
-        const EXTRA_GAP: usize = 3;
-
         let Position { x, y } = self.get_cursor_position();
 
         self.offset.y = self.offset.y.clamp(
@@ -365,9 +436,17 @@ impl Editor {
         Ok(())
     }
 
-    pub fn save(&self, filename: &str) -> Result<(), Error> {
+    pub fn save_file(&mut self) -> Result<(), Error> {
+        if self.filename.is_none() {
+            self.filename = Tui::prompt_filename()?;
+        }
+
+        if self.filename.is_none() {
+            return Ok(());
+        }
+
         std::fs::write(
-            filename,
+            self.filename.clone().unwrap(),
             self.buffer
                 .iter()
                 .map(|row| row.to_string())
@@ -375,6 +454,8 @@ impl Editor {
                 .join("\n"),
         )?;
         // TODO: Option to save with \r\n
+
+        self.changed = false;
         Ok(())
     }
 }
