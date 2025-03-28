@@ -1,6 +1,6 @@
-use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
+use crate::config::{self, config_dirs, parse_value as pv, parse_values as pvs};
 use crate::error::Error;
 
 /// Type of syntax highlighting for a single rendered character.
@@ -19,12 +19,6 @@ pub enum HlType {
     MlComment = 134, // Blue
     Keyword1 = 33,   // Yellow
     Keyword2 = 35,   // Magenta
-}
-
-impl Display for HlType {
-    /// Write the ANSI color escape sequence for the `HLType` using the given
-    /// formatter.
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result { write!(f, "\x1b[{}m", (*self as u32) % 100) }
 }
 
 /// Configuration for syntax highlighting.
@@ -52,7 +46,7 @@ impl Conf {
     /// Return the syntax configuration corresponding to the given file
     /// extension, if a matching INI file is found in a config directory.
     pub fn get(ext: &str) -> Result<Option<Self>, Error> {
-        for conf_dir in sys::data_dirs() {
+        for conf_dir in config_dirs() {
             match PathBuf::from(conf_dir).join("syntax.d").read_dir() {
                 Ok(dir_entries) =>
                     for dir_entry in dir_entries {
@@ -124,7 +118,6 @@ mod tests {
         let tmp_path = tmp_dir.path().join("path_does_not_exist.ini");
         match Conf::from_file(&tmp_path) {
             Ok(_) => panic!("Conf::from_file should return an error"),
-            Err(Error::Config(path, 0, _)) if path == tmp_path => (),
             Err(e) => panic!("Unexpected error {:?}", e),
         }
     }

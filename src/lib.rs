@@ -1,3 +1,6 @@
-pub use error::Error;
-
-mod error;
+pub mod config;
+pub mod editor;
+pub mod error;
+pub mod row;
+pub mod syntax;
+pub mod terminal;

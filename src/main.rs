@@ -1,4 +1,4 @@
-use arcaea::Error;
+use arcaea::{config::Config, editor::Editor, error::Error};
 use crossterm::style::Stylize;
 
 fn main() -> Result<(), Error> {
@@ -11,11 +11,7 @@ fn main() -> Result<(), Error> {
         (Some(arg), 0) if arg == "-h" || arg == "--help" => print_help_message(),
         (Some(arg), 0) if arg.starts_with('-') => return Err(Error::UnrecognizedOption(arg)),
 
-        (None, 0) => todo!("Implement functionality to create a new file"),
-        (Some(filename), 0) => todo!(
-            "Implement file parsing for the provided filename: {:?}",
-            filename
-        ),
+        (filename, 0) => Editor::new(Config::load()?)?.run(&filename)?,
 
         (_, n_remaining_args) => return Err(Error::TooManyArguments(n_remaining_args + 1)),
     }
