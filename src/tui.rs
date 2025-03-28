@@ -29,6 +29,10 @@ impl Tui {
                         _ => {}
                     },
 
+                    Event::Mouse(_) => {
+                        todo!("Mouse event handling");
+                    }
+
                     _ => {}
                 }
             }
@@ -56,6 +60,10 @@ impl Tui {
 
                         _ => {}
                     },
+
+                    Event::Mouse(_) => {
+                        todo!("Mouse event handling");
+                    }
 
                     _ => {}
                 }

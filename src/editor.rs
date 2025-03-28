@@ -243,6 +243,10 @@ impl Editor {
                                 }
                             }
 
+                            MouseButton::Right => {
+                                todo!("Right click event handling");
+                            }
+
                             _ => {}
                         },
 

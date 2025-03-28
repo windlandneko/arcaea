@@ -1,3 +1,4 @@
+use std::fmt;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -12,11 +13,21 @@ impl Row {
         self.rope.len()
     }
 
-    pub fn to_string(&self) -> String {
-        self.rope
-            .iter()
-            .map(|(grapheme, _)| grapheme.as_str())
-            .collect()
+    pub fn is_empty(&self) -> bool {
+        self.rope.is_empty()
+    }
+}
+
+impl fmt::Display for Row {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.rope
+                .iter()
+                .map(|(g, _)| g.as_str())
+                .collect::<String>()
+        )
     }
 }
 
