@@ -227,8 +227,8 @@ impl Editor {
                             MouseButton::Left => {
                                 if event.row < self.height as u16 - 2 {
                                     self.cursor.y = event.row as usize + self.offset.y;
-                                    let x =
-                                        (event.column as usize).saturating_sub(self.sidebar_width);
+                                    let x = (event.column as usize + self.offset.x)
+                                        .saturating_sub(self.sidebar_width + 1);
 
                                     let mut width = 0;
                                     for (i, cell) in
@@ -245,6 +245,10 @@ impl Editor {
 
                             _ => {}
                         },
+
+                        MouseEventKind::Moved => {
+                            continue;
+                        }
 
                         _ => {}
                     },
