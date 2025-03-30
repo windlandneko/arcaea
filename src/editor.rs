@@ -425,7 +425,7 @@ impl Editor {
                     self.viewbox.x + 1,
                     self.cursor.y + 1,
                     self.cursor.x + 1,
-                    self.anchor.and_then(|a| Some((a.y + 1, a.x + 1))),
+                    self.anchor.map(|a| (a.y + 1, a.x + 1)),
                     c.y + 1,
                     c.x + 1
                 );
@@ -462,12 +462,12 @@ impl Editor {
     }
 
     fn get_selection(&self) -> Option<(Position, Position)> {
-        self.anchor.and_then(|anchor| {
+        self.anchor.map(|anchor| {
             let cursor = self.cursor;
             if anchor < cursor {
-                Some((anchor, cursor))
+                (anchor, cursor)
             } else {
-                Some((cursor, anchor))
+                (cursor, anchor)
             }
         })
     }
