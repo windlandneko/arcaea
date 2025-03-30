@@ -38,20 +38,20 @@ pub struct Editor {
     filename: Option<String>,
 
     buffer: Vec<Row>,
-    debug_output: String,
+    status_string: String,
     height: usize,
     width: usize,
 
     sidebar_width: usize,
 
-    offset: Position,
+    viewbox: Position,
     cursor: Position,
 
     /// The position of the selection.
     /// None if not selected, Some if selected a range.
     anchor: Option<Position>,
 
-    changed: bool,
+    dirty: bool,
 }
 
 impl Editor {
@@ -77,7 +77,7 @@ impl Editor {
             self.buffer = Vec::new();
             self.buffer.push(Row::from(String::new()));
 
-            self.changed = true;
+            self.dirty = true;
         }
 
         terminal::enable_raw_mode()?;
@@ -109,7 +109,7 @@ impl Editor {
                     Event::Key(event) => match (event.modifiers, event.code) {
                         (KeyModifiers::CONTROL, KeyCode::Char('s')) => self.save_file()?,
                         (_, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
-                            match Tui::confirm_exit(self.changed)? {
+                            match Tui::confirm_exit(self.dirty)? {
                                 Some(true) => {
                                     self.save_file()?;
                                     break;
@@ -184,7 +184,7 @@ impl Editor {
                                 }
 
                                 KeyCode::Enter => {
-                                    self.changed = true;
+                                    self.dirty = true;
 
                                     self.cursor.x = self.cursor.x.min(self.get_width());
 
@@ -202,7 +202,7 @@ impl Editor {
                                 }
 
                                 KeyCode::Backspace => {
-                                    self.changed = true;
+                                    self.dirty = true;
 
                                     self.cursor.x = self.cursor.x.min(self.get_width());
 
@@ -218,7 +218,7 @@ impl Editor {
                                     }
                                 }
                                 KeyCode::Delete => {
-                                    self.changed = true;
+                                    self.dirty = true;
 
                                     self.cursor.x = self.cursor.x.min(self.get_width());
 
@@ -232,7 +232,7 @@ impl Editor {
                                 }
 
                                 KeyCode::Char(c) => {
-                                    self.changed = true;
+                                    self.dirty = true;
 
                                     self.cursor.x = self.cursor.x.min(self.get_width());
 
@@ -257,7 +257,7 @@ impl Editor {
                             } else {
                                 3
                             };
-                            self.offset.y = self.offset.y.saturating_sub(dt);
+                            self.viewbox.y = self.viewbox.y.saturating_sub(dt);
                         }
                         MouseEventKind::ScrollDown => {
                             let dt = if event.modifiers == KeyModifiers::ALT {
@@ -265,23 +265,23 @@ impl Editor {
                             } else {
                                 3
                             };
-                            self.offset.y = (self.offset.y + dt).min(
+                            self.viewbox.y = (self.viewbox.y + dt).min(
                                 (self.buffer.len() + EXTRA_GAP).saturating_sub(self.height - 2),
                             );
                         }
                         MouseEventKind::ScrollLeft => {
-                            self.offset.x = self.offset.x.saturating_sub(3);
+                            self.viewbox.x = self.viewbox.x.saturating_sub(3);
                         }
                         MouseEventKind::ScrollRight => {
-                            self.offset.x =
-                                (self.offset.x + 3).min(self.get_width() + EXTRA_GAP + 1);
+                            self.viewbox.x =
+                                (self.viewbox.x + 3).min(self.get_width() + EXTRA_GAP + 1);
                         }
 
                         MouseEventKind::Down(MouseButton::Left)
                         | MouseEventKind::Drag(MouseButton::Left) => {
                             if event.row < self.height as u16 - 2 {
-                                self.cursor.y = event.row as usize + self.offset.y;
-                                let x = (event.column as usize + self.offset.x)
+                                self.cursor.y = event.row as usize + self.viewbox.y;
+                                let x = (event.column as usize + self.viewbox.x)
                                     .saturating_sub(self.sidebar_width + 1);
 
                                 let mut width = 0;
@@ -316,10 +316,10 @@ impl Editor {
                 }
 
                 let c = self.get_cursor_position();
-                self.debug_output = format!(
+                self.status_string = format!(
                     "View: ({}, {}) | Cursor: ({}, {}) / ({}, {})",
-                    self.offset.y + 1,
-                    self.offset.x + 1,
+                    self.viewbox.y + 1,
+                    self.viewbox.x + 1,
                     self.cursor.y + 1,
                     self.cursor.x + 1,
                     c.y + 1,
@@ -370,7 +370,7 @@ impl Editor {
         // draw statusbar
         {
             let content_left = format!(" {}", self.filename.as_deref().unwrap_or("Untitled"));
-            let content_left = if self.changed {
+            let content_left = if self.dirty {
                 format!("{} (未保存)", content_left)
             } else {
                 content_left
@@ -396,13 +396,13 @@ impl Editor {
         queue!(
             stdout,
             cursor::MoveTo(0, self.height as u16 - 1),
-            style::Print(self.debug_output.clone().dark_grey())
+            style::Print(self.status_string.clone().dark_grey())
         )?;
 
         self.render_sidebar(cursor)?;
 
-        let start = self.offset.y;
-        let end = (self.offset.y + self.height)
+        let start = self.viewbox.y;
+        let end = (self.viewbox.y + self.height)
             .saturating_sub(2)
             .min(self.buffer.len());
 
@@ -412,7 +412,7 @@ impl Editor {
                 cursor::MoveTo(self.sidebar_width as u16 + 1, (line_number - start) as u16)
             )?;
 
-            let view_end = self.offset.x + self.width - self.sidebar_width;
+            let view_end = self.viewbox.x + self.width - self.sidebar_width;
             let mut width = 0;
             let mut last_color = None;
             for (i, (g, w)) in self.buffer[line_number].rope.iter().enumerate() {
@@ -420,7 +420,7 @@ impl Editor {
                 if width >= view_end {
                     break;
                 }
-                if self.offset.x < width {
+                if self.viewbox.x < width {
                     let fg_color = (255, 255, 255);
 
                     let mut bg_color = (59, 34, 76);
@@ -464,13 +464,13 @@ impl Editor {
         queue!(stdout, style::SetBackgroundColor((59, 34, 76).into()))?;
         for i in 0..(self.height.saturating_sub(2)) {
             queue!(stdout, cursor::MoveTo(0, i as u16))?;
-            if self.offset.y + i < self.buffer.len() {
+            if self.viewbox.y + i < self.buffer.len() {
                 let lineno = format!(
                     "{:>width$} ",
-                    i + self.offset.y + 1,
+                    i + self.viewbox.y + 1,
                     width = self.sidebar_width
                 );
-                let num = if i + self.offset.y == cursor.y {
+                let num = if i + self.viewbox.y == cursor.y {
                     lineno.with((219, 191, 239).into())
                 } else {
                     lineno.with((90, 89, 119).into())
@@ -492,8 +492,8 @@ impl Editor {
     fn render_cursor(&self, cursor: Position) -> Result<(), Error> {
         let mut stdout = io::stdout();
         let (x, y) = (
-            cursor.x as isize - self.offset.x as isize + self.sidebar_width as isize + 1,
-            cursor.y as isize - self.offset.y as isize,
+            cursor.x as isize - self.viewbox.x as isize + self.sidebar_width as isize + 1,
+            cursor.y as isize - self.viewbox.y as isize,
         );
 
         if x >= 0 && x < self.width as isize && y >= 0 && y < self.height as isize {
@@ -517,7 +517,7 @@ impl Editor {
 
     fn update_sidebar_width(&mut self) {
         // Calculate sidebar width based on maximum possible line number
-        let max_line_num = (self.offset.y + self.height)
+        let max_line_num = (self.viewbox.y + self.height)
             .saturating_sub(2)
             .min(self.buffer.len());
         self.sidebar_width = if max_line_num > 99 {
@@ -530,12 +530,12 @@ impl Editor {
     fn update_offset(&mut self) {
         let Position { x, y } = self.get_cursor_position();
 
-        self.offset.y = self.offset.y.clamp(
+        self.viewbox.y = self.viewbox.y.clamp(
             (y + EXTRA_GAP + 3).saturating_sub(self.height),
             y.saturating_sub(EXTRA_GAP),
         );
 
-        self.offset.x = self.offset.x.clamp(
+        self.viewbox.x = self.viewbox.x.clamp(
             (x + EXTRA_GAP + 1).saturating_sub(self.width - self.sidebar_width),
             x.saturating_sub(EXTRA_GAP),
         );
@@ -576,7 +576,7 @@ impl Editor {
         )?;
         // TODO: Option to save with \r\n
 
-        self.changed = false;
+        self.dirty = false;
         Ok(())
     }
 }
