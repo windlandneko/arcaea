@@ -444,7 +444,9 @@ impl Editor {
                             }
                         }
 
-                        _ => {}
+                        _ => {
+                            should_update_viewbox = false;
+                        }
                     },
 
                     Event::Resize(width, height) => {
