@@ -83,8 +83,8 @@ impl Editor {
         terminal::enable_raw_mode()?;
         execute!(
             stdout,
-            terminal::EnterAlternateScreen,
-            terminal::DisableLineWrap,
+            // terminal::EnterAlternateScreen,
+            // terminal::DisableLineWrap,
             event::EnableMouseCapture,
             event::EnableBracketedPaste,
             event::EnableFocusChange,
@@ -104,10 +104,13 @@ impl Editor {
     fn event_loop(&mut self) -> Result<(), Error> {
         loop {
             if event::poll(std::time::Duration::from_millis(100))? {
+                let mut should_update_viewbox = true;
+
                 match event::read()? {
                     // Keyboard Event
                     Event::Key(event) => match (event.modifiers, event.code) {
                         (KeyModifiers::CONTROL, KeyCode::Char('s')) => self.save_file()?,
+
                         (_, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
                             match Tui::confirm_exit(self.dirty)? {
                                 Some(true) => {
@@ -120,12 +123,35 @@ impl Editor {
                                 None => {}
                             }
                         }
+
+                        // Regular character input
+                        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                            self.dirty = true;
+
+                            self.cursor.x = self.cursor.x.min(self.get_width());
+
+                            if let Some((start, end)) = self.get_selection() {
+                                self.delete_selection_range(start, end);
+                            }
+
+                            self.buffer[self.cursor.y]
+                                .rope
+                                .insert(self.cursor.x, (c.to_string(), c.width().unwrap_or(0)));
+                            self.cursor.x += 1;
+                        }
+
+                        // Control character input
+                        // viewbox or cursor's movement; delete; enter; etc.
                         (modifiers, code) => {
                             match code {
                                 KeyCode::Up => {
                                     self.update_selection(modifiers);
 
-                                    if self.cursor.y > 0 {
+                                    if modifiers == KeyModifiers::CONTROL {
+                                        should_update_viewbox = false;
+
+                                        self.viewbox.y = self.viewbox.y.saturating_sub(1);
+                                    } else if self.cursor.y > 0 {
                                         self.cursor.y -= 1;
                                     } else {
                                         self.cursor.x = 0;
@@ -134,7 +160,14 @@ impl Editor {
                                 KeyCode::Down => {
                                     self.update_selection(modifiers);
 
-                                    if self.cursor.y < self.buffer.len() - 1 {
+                                    if modifiers == KeyModifiers::CONTROL {
+                                        should_update_viewbox = false;
+
+                                        self.viewbox.y = (self.viewbox.y + 1).min(
+                                            (self.buffer.len() + EXTRA_GAP)
+                                                .saturating_sub(self.height - 2),
+                                        );
+                                    } else if self.cursor.y < self.buffer.len() - 1 {
                                         self.cursor.y += 1;
                                     } else {
                                         self.cursor.x = self.get_width();
@@ -145,7 +178,25 @@ impl Editor {
 
                                     self.update_selection(modifiers);
 
-                                    if self.cursor.x > 0 {
+                                    if modifiers == KeyModifiers::CONTROL {
+                                        // Move to the beginning of the word
+                                        if self.cursor.x == 0 && self.cursor.y > 0 {
+                                            self.cursor.y -= 1;
+                                            self.cursor.x = self.get_width();
+                                        }
+                                        while self.cursor.x > 0
+                                            && self.buffer[self.cursor.y].rope[self.cursor.x - 1].0
+                                                == " "
+                                        {
+                                            self.cursor.x -= 1;
+                                        }
+                                        while self.cursor.x > 0
+                                            && self.buffer[self.cursor.y].rope[self.cursor.x - 1].0
+                                                != " "
+                                        {
+                                            self.cursor.x -= 1;
+                                        }
+                                    } else if self.cursor.x > 0 {
                                         self.cursor.x -= 1;
                                     } else if self.cursor.y > 0 {
                                         self.cursor.y -= 1;
@@ -154,10 +205,29 @@ impl Editor {
                                 }
                                 KeyCode::Right => {
                                     self.cursor.x = self.cursor.x.min(self.get_width());
-
                                     self.update_selection(modifiers);
 
-                                    if self.cursor.x < self.get_width() {
+                                    if modifiers == KeyModifiers::CONTROL {
+                                        // Move to the end of the word
+                                        if self.cursor.x == self.get_width()
+                                            && self.cursor.y < self.buffer.len() - 1
+                                        {
+                                            self.cursor.y += 1;
+                                            self.cursor.x = 0;
+                                        }
+                                        while self.cursor.x < self.buffer[self.cursor.y].rope.len()
+                                            && self.buffer[self.cursor.y].rope[self.cursor.x].0
+                                                == " "
+                                        {
+                                            self.cursor.x += 1;
+                                        }
+                                        while self.cursor.x < self.buffer[self.cursor.y].rope.len()
+                                            && self.buffer[self.cursor.y].rope[self.cursor.x].0
+                                                != " "
+                                        {
+                                            self.cursor.x += 1;
+                                        }
+                                    } else if self.cursor.x < self.get_width() {
                                         self.cursor.x += 1;
                                     } else if self.cursor.y < self.buffer.len() - 1 {
                                         self.cursor.y += 1;
@@ -188,6 +258,10 @@ impl Editor {
 
                                     self.cursor.x = self.cursor.x.min(self.get_width());
 
+                                    if let Some((start, end)) = self.get_selection() {
+                                        self.delete_selection_range(start, end);
+                                    }
+
                                     let new_line = Row {
                                         rope: self.buffer[self.cursor.y].rope[self.cursor.x..]
                                             .to_vec(),
@@ -206,10 +280,15 @@ impl Editor {
 
                                     self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                    if self.cursor.x > 0 {
+                                    if let Some((start, end)) = self.get_selection() {
+                                        self.delete_selection_range(start, end);
+                                    } else if self.cursor.x > 0 {
+                                        // The cursor is in the middle, just delete the char
                                         self.cursor.x -= 1;
                                         self.buffer[self.cursor.y].rope.remove(self.cursor.x);
                                     } else if self.cursor.y > 0 {
+                                        // The cursor is in the beginning, and not at the first line
+                                        // Merge the current line with the previous line
                                         self.cursor.y -= 1;
                                         self.cursor.x = self.get_width();
                                         let mut rope = self.buffer[self.cursor.y].rope.clone();
@@ -222,36 +301,30 @@ impl Editor {
 
                                     self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                    if self.cursor.x < self.get_width() {
+                                    if let Some((start, end)) = self.get_selection() {
+                                        self.delete_selection_range(start, end);
+                                    } else if self.cursor.x < self.get_width() {
+                                        // The cursor is in the middle, just delete the char
                                         self.buffer[self.cursor.y].rope.remove(self.cursor.x);
                                     } else if self.cursor.y < self.buffer.len() - 1 {
+                                        // The cursor is in the end, and not at the last line
+                                        // Merge the current line with the next line
                                         let mut rope = self.buffer[self.cursor.y].rope.clone();
                                         rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
                                         self.buffer[self.cursor.y] = Row { rope };
                                     }
                                 }
 
-                                KeyCode::Char(c) => {
-                                    self.dirty = true;
-
-                                    self.cursor.x = self.cursor.x.min(self.get_width());
-
-                                    self.buffer[self.cursor.y].rope.insert(
-                                        self.cursor.x,
-                                        (c.to_string(), c.width().unwrap_or(0)),
-                                    );
-                                    self.cursor.x += 1;
-                                }
-
                                 _ => {}
                             }
-                            self.update_offset();
                         }
                     },
 
                     // Mouse Event
                     Event::Mouse(event) => match event.kind {
                         MouseEventKind::ScrollUp => {
+                            should_update_viewbox = false;
+
                             let dt = if event.modifiers == KeyModifiers::ALT {
                                 8
                             } else {
@@ -260,6 +333,8 @@ impl Editor {
                             self.viewbox.y = self.viewbox.y.saturating_sub(dt);
                         }
                         MouseEventKind::ScrollDown => {
+                            should_update_viewbox = false;
+
                             let dt = if event.modifiers == KeyModifiers::ALT {
                                 8
                             } else {
@@ -270,35 +345,63 @@ impl Editor {
                             );
                         }
                         MouseEventKind::ScrollLeft => {
+                            should_update_viewbox = false;
+
                             self.viewbox.x = self.viewbox.x.saturating_sub(3);
                         }
                         MouseEventKind::ScrollRight => {
+                            should_update_viewbox = false;
+
                             self.viewbox.x =
                                 (self.viewbox.x + 3).min(self.get_width() + EXTRA_GAP + 1);
                         }
 
                         MouseEventKind::Down(MouseButton::Left)
                         | MouseEventKind::Drag(MouseButton::Left) => {
-                            if event.row < self.height as u16 - 2 {
+                            if (event.row as usize) < self.height - 2 {
                                 self.cursor.y = event.row as usize + self.viewbox.y;
                                 let x = (event.column as usize + self.viewbox.x)
                                     .saturating_sub(self.sidebar_width + 1);
 
-                                let mut width = 0;
-                                for (i, cell) in self.buffer[self.cursor.y].rope.iter().enumerate()
-                                {
-                                    if width + cell.1 / 2 >= x {
-                                        self.cursor.x = i;
-                                        break;
+                                if self.cursor.y >= self.buffer.len() {
+                                    self.cursor.y = self.buffer.len() - 1;
+                                    self.cursor.x = self.get_width();
+                                } else if (event.column as usize) < self.sidebar_width {
+                                    self.cursor.x = 0;
+                                    self.cursor.y = event.row as usize + self.viewbox.y;
+                                    if event.kind == MouseEventKind::Down(MouseButton::Left) {
+                                        self.anchor = Some(self.cursor);
                                     }
-                                    width += cell.1;
-                                }
-                            }
+                                    if self.cursor.y >= self.anchor.unwrap_or(self.cursor).y {
+                                        self.cursor.y += 1;
+                                        if self.cursor.y == self.buffer.len() {
+                                            self.cursor.y = self.buffer.len() - 1;
+                                            self.cursor.x = self.get_width();
+                                        }
+                                    }
+                                } else {
+                                    if x > self.get_width() {
+                                        self.cursor.x = self.get_width();
+                                    } else {
+                                        let mut width = 0;
+                                        for (i, cell) in
+                                            self.buffer[self.cursor.y].rope.iter().enumerate()
+                                        {
+                                            if width + cell.1 / 2 >= x {
+                                                self.cursor.x = i;
+                                                break;
+                                            }
+                                            width += cell.1;
+                                        }
+                                    }
 
-                            if event.kind == MouseEventKind::Down(MouseButton::Left)
-                                && event.modifiers != KeyModifiers::SHIFT
-                            {
-                                self.anchor = Some(self.cursor);
+                                    if event.kind == MouseEventKind::Down(MouseButton::Left)
+                                    // TODO: Make Shift+Drag work
+                                    // && event.modifiers != KeyModifiers::SHIFT
+                                    {
+                                        self.anchor = Some(self.cursor);
+                                    }
+                                }
                             }
                         }
 
@@ -316,21 +419,46 @@ impl Editor {
                 }
 
                 let c = self.get_cursor_position();
-                self.status_string = format!(
-                    "View: ({}, {}) | Cursor: ({}, {}) / ({}, {})",
+                let status = format!(
+                    " viewbox: ({}, {}) | cursor: ({}, {}) @ {:?} | view cursor: ({}, {})",
                     self.viewbox.y + 1,
                     self.viewbox.x + 1,
                     self.cursor.y + 1,
                     self.cursor.x + 1,
+                    self.anchor.and_then(|a| Some((a.y + 1, a.x + 1))),
                     c.y + 1,
                     c.x + 1
                 );
+                self.status_string = format!("{:<width$}", status, width = self.width);
+
+                if should_update_viewbox {
+                    self.update_viewbox();
+                }
 
                 self.render()?;
             }
         }
 
         Ok(())
+    }
+
+    fn delete_selection_range(&mut self, start: Position, end: Position) {
+        // Range delete
+        self.buffer[start.y] = Row {
+            rope: self.buffer[start.y]
+                .rope
+                .iter()
+                .take(start.x)
+                .chain(self.buffer[end.y].rope.iter().skip(end.x))
+                .cloned()
+                .collect(),
+        };
+        for index in (start.y + 1..=end.y).rev() {
+            self.buffer.remove(index);
+        }
+        // Reset cursor and anchor
+        self.cursor = start;
+        self.anchor = None;
     }
 
     fn get_selection(&self) -> Option<(Position, Position)> {
@@ -477,6 +605,10 @@ impl Editor {
                 };
                 write!(stdout, "{}", num)?;
             } else {
+                queue!(
+                    stdout,
+                    terminal::Clear(terminal::ClearType::UntilNewLine),
+                )?;
                 write!(
                     stdout,
                     "{} ",
@@ -527,7 +659,7 @@ impl Editor {
         } + 1; // the " │" part
     }
 
-    fn update_offset(&mut self) {
+    fn update_viewbox(&mut self) {
         let Position { x, y } = self.get_cursor_position();
 
         self.viewbox.y = self.viewbox.y.clamp(
