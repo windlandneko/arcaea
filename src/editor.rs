@@ -127,18 +127,19 @@ impl Editor {
                             }
 
                             // Regular character input
-                            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(char)) => {
                                 self.dirty = true;
 
                                 self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                if let Some((start, end)) = self.get_selection() {
-                                    self.delete_selection_range(start, end);
+                                if let Some((begin, end)) = self.get_selection() {
+                                    self.delete_selection_range(begin, end);
                                 }
 
-                                self.buffer[self.cursor.y]
-                                    .rope
-                                    .insert(self.cursor.x, (c.to_string(), c.width().unwrap_or(0)));
+                                self.buffer[self.cursor.y].rope.insert(
+                                    self.cursor.x,
+                                    (char.to_string(), char.width().unwrap_or(0)),
+                                );
                                 self.cursor.x += 1;
                             }
 
@@ -147,7 +148,21 @@ impl Editor {
                             (modifiers, code) => {
                                 match code {
                                     KeyCode::Up => {
-                                        self.update_selection(modifiers);
+                                        if modifiers == KeyModifiers::ALT {
+                                            let (begin, end) = self
+                                                .get_selection()
+                                                .unwrap_or_else(|| (self.cursor, self.cursor));
+                                            if begin.y > 0 {
+                                                for i in begin.y..=end.y {
+                                                    self.buffer.swap(i - 1, i);
+                                                }
+                                                if let Some(anchor) = &mut self.anchor {
+                                                    anchor.y -= 1;
+                                                }
+                                            }
+                                        } else {
+                                            self.update_selection(modifiers);
+                                        }
 
                                         if modifiers == KeyModifiers::CONTROL {
                                             should_update_viewbox = false;
@@ -160,7 +175,21 @@ impl Editor {
                                         }
                                     }
                                     KeyCode::Down => {
-                                        self.update_selection(modifiers);
+                                        if modifiers == KeyModifiers::ALT {
+                                            let (begin, end) = self
+                                                .get_selection()
+                                                .unwrap_or_else(|| (self.cursor, self.cursor));
+                                            if end.y < self.buffer.len() - 1 {
+                                                for i in (begin.y..=end.y).rev() {
+                                                    self.buffer.swap(i, i + 1);
+                                                }
+                                                if let Some(anchor) = &mut self.anchor {
+                                                    anchor.y += 1;
+                                                }
+                                            }
+                                        } else {
+                                            self.update_selection(modifiers);
+                                        }
 
                                         if modifiers == KeyModifiers::CONTROL {
                                             should_update_viewbox = false;
@@ -267,8 +296,8 @@ impl Editor {
 
                                         self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                        if let Some((start, end)) = self.get_selection() {
-                                            self.delete_selection_range(start, end);
+                                        if let Some((begin, end)) = self.get_selection() {
+                                            self.delete_selection_range(begin, end);
                                         }
 
                                         let new_line = Row {
@@ -289,8 +318,8 @@ impl Editor {
 
                                         self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                        if let Some((start, end)) = self.get_selection() {
-                                            self.delete_selection_range(start, end);
+                                        if let Some((begin, end)) = self.get_selection() {
+                                            self.delete_selection_range(begin, end);
                                         } else if self.cursor.x > 0 {
                                             // The cursor is in the middle, just delete the char
                                             self.cursor.x -= 1;
@@ -310,8 +339,8 @@ impl Editor {
 
                                         self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                        if let Some((start, end)) = self.get_selection() {
-                                            self.delete_selection_range(start, end);
+                                        if let Some((begin, end)) = self.get_selection() {
+                                            self.delete_selection_range(begin, end);
                                         } else if self.cursor.x < self.get_width() {
                                             // The cursor is in the middle, just delete the char
                                             self.buffer[self.cursor.y].rope.remove(self.cursor.x);
@@ -452,22 +481,22 @@ impl Editor {
         Ok(())
     }
 
-    fn delete_selection_range(&mut self, start: Position, end: Position) {
+    fn delete_selection_range(&mut self, begin: Position, end: Position) {
         // Range delete
-        self.buffer[start.y] = Row {
-            rope: self.buffer[start.y]
+        self.buffer[begin.y] = Row {
+            rope: self.buffer[begin.y]
                 .rope
                 .iter()
-                .take(start.x)
+                .take(begin.x)
                 .chain(self.buffer[end.y].rope.iter().skip(end.x))
                 .cloned()
                 .collect(),
         };
-        for index in (start.y + 1..=end.y).rev() {
+        for index in (begin.y + 1..=end.y).rev() {
             self.buffer.remove(index);
         }
         // Reset cursor and anchor
-        self.cursor = start;
+        self.cursor = begin;
         self.anchor = None;
     }
 
@@ -539,15 +568,15 @@ impl Editor {
 
         self.render_sidebar(cursor)?;
 
-        let start = self.viewbox.y;
+        let begin = self.viewbox.y;
         let end = (self.viewbox.y + self.height)
             .saturating_sub(2)
             .min(self.buffer.len());
 
-        for line_number in start..end {
+        for line_number in begin..end {
             queue!(
                 stdout,
-                cursor::MoveTo(self.sidebar_width as u16 + 1, (line_number - start) as u16)
+                cursor::MoveTo(self.sidebar_width as u16 + 1, (line_number - begin) as u16)
             )?;
 
             let view_end = self.viewbox.x + self.width - self.sidebar_width;
