@@ -1,4 +1,4 @@
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
 use crate::Error;
 
@@ -15,7 +15,7 @@ impl Tui {
         loop {
             if event::poll(std::time::Duration::from_millis(100))? {
                 match event::read()? {
-                    Event::Key(event) => match event.code {
+                    Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                             return Ok(Some(true));
                         }
@@ -47,7 +47,7 @@ impl Tui {
         loop {
             if event::poll(std::time::Duration::from_millis(100))? {
                 match event::read()? {
-                    Event::Key(event) => match event.code {
+                    Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
                         KeyCode::Char(c) => {
                             filename.push(c);
                         }

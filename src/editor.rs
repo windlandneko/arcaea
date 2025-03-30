@@ -1,6 +1,6 @@
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
     execute, queue,
     style::{self, Stylize},
     terminal,
@@ -83,8 +83,8 @@ impl Editor {
         terminal::enable_raw_mode()?;
         execute!(
             stdout,
-            // terminal::EnterAlternateScreen,
-            // terminal::DisableLineWrap,
+            terminal::EnterAlternateScreen,
+            terminal::DisableLineWrap,
             event::EnableMouseCapture,
             event::EnableBracketedPaste,
             event::EnableFocusChange,
@@ -108,217 +108,227 @@ impl Editor {
 
                 match event::read()? {
                     // Keyboard Event
-                    Event::Key(event) => match (event.modifiers, event.code) {
-                        (KeyModifiers::CONTROL, KeyCode::Char('s')) => self.save_file()?,
+                    Event::Key(event) if event.kind != KeyEventKind::Release => {
+                        match (event.modifiers, event.code) {
+                            (KeyModifiers::CONTROL, KeyCode::Char('s')) => self.save_file()?,
 
-                        (_, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
-                            match Tui::confirm_exit(self.dirty)? {
-                                Some(true) => {
-                                    self.save_file()?;
-                                    break;
+                            (_, KeyCode::Esc)
+                            | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
+                                match Tui::confirm_exit(self.dirty)? {
+                                    Some(true) => {
+                                        self.save_file()?;
+                                        break;
+                                    }
+                                    Some(false) => {
+                                        break;
+                                    }
+                                    None => {}
                                 }
-                                Some(false) => {
-                                    break;
-                                }
-                                None => {}
-                            }
-                        }
-
-                        // Regular character input
-                        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-                            self.dirty = true;
-
-                            self.cursor.x = self.cursor.x.min(self.get_width());
-
-                            if let Some((start, end)) = self.get_selection() {
-                                self.delete_selection_range(start, end);
                             }
 
-                            self.buffer[self.cursor.y]
-                                .rope
-                                .insert(self.cursor.x, (c.to_string(), c.width().unwrap_or(0)));
-                            self.cursor.x += 1;
-                        }
+                            // Regular character input
+                            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                                self.dirty = true;
 
-                        // Control character input
-                        // viewbox or cursor's movement; delete; enter; etc.
-                        (modifiers, code) => {
-                            match code {
-                                KeyCode::Up => {
-                                    self.update_selection(modifiers);
+                                self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                    if modifiers == KeyModifiers::CONTROL {
-                                        should_update_viewbox = false;
-
-                                        self.viewbox.y = self.viewbox.y.saturating_sub(1);
-                                    } else if self.cursor.y > 0 {
-                                        self.cursor.y -= 1;
-                                    } else {
-                                        self.cursor.x = 0;
-                                    }
+                                if let Some((start, end)) = self.get_selection() {
+                                    self.delete_selection_range(start, end);
                                 }
-                                KeyCode::Down => {
-                                    self.update_selection(modifiers);
 
-                                    if modifiers == KeyModifiers::CONTROL {
-                                        should_update_viewbox = false;
+                                self.buffer[self.cursor.y]
+                                    .rope
+                                    .insert(self.cursor.x, (c.to_string(), c.width().unwrap_or(0)));
+                                self.cursor.x += 1;
+                            }
 
-                                        self.viewbox.y = (self.viewbox.y + 1).min(
-                                            (self.buffer.len() + EXTRA_GAP)
-                                                .saturating_sub(self.height - 2),
-                                        );
-                                    } else if self.cursor.y < self.buffer.len() - 1 {
-                                        self.cursor.y += 1;
-                                    } else {
-                                        self.cursor.x = self.get_width();
+                            // Control character input
+                            // viewbox or cursor's movement; delete; enter; etc.
+                            (modifiers, code) => {
+                                match code {
+                                    KeyCode::Up => {
+                                        self.update_selection(modifiers);
+
+                                        if modifiers == KeyModifiers::CONTROL {
+                                            should_update_viewbox = false;
+
+                                            self.viewbox.y = self.viewbox.y.saturating_sub(1);
+                                        } else if self.cursor.y > 0 {
+                                            self.cursor.y -= 1;
+                                        } else {
+                                            self.cursor.x = 0;
+                                        }
                                     }
-                                }
-                                KeyCode::Left => {
-                                    self.cursor.x = self.cursor.x.min(self.get_width());
+                                    KeyCode::Down => {
+                                        self.update_selection(modifiers);
 
-                                    self.update_selection(modifiers);
+                                        if modifiers == KeyModifiers::CONTROL {
+                                            should_update_viewbox = false;
 
-                                    if modifiers == KeyModifiers::CONTROL {
-                                        // Move to the beginning of the word
-                                        if self.cursor.x == 0 && self.cursor.y > 0 {
+                                            self.viewbox.y = (self.viewbox.y + 1).min(
+                                                (self.buffer.len() + EXTRA_GAP)
+                                                    .saturating_sub(self.height - 2),
+                                            );
+                                        } else if self.cursor.y < self.buffer.len() - 1 {
+                                            self.cursor.y += 1;
+                                        } else {
+                                            self.cursor.x = self.get_width();
+                                        }
+                                    }
+                                    KeyCode::Left => {
+                                        self.cursor.x = self.cursor.x.min(self.get_width());
+
+                                        self.update_selection(modifiers);
+
+                                        if modifiers == KeyModifiers::CONTROL {
+                                            // Move to the beginning of the word
+                                            if self.cursor.x == 0 && self.cursor.y > 0 {
+                                                self.cursor.y -= 1;
+                                                self.cursor.x = self.get_width();
+                                            }
+                                            while self.cursor.x > 0
+                                                && self.buffer[self.cursor.y].rope
+                                                    [self.cursor.x - 1]
+                                                    .0
+                                                    == " "
+                                            {
+                                                self.cursor.x -= 1;
+                                            }
+                                            while self.cursor.x > 0
+                                                && self.buffer[self.cursor.y].rope
+                                                    [self.cursor.x - 1]
+                                                    .0
+                                                    != " "
+                                            {
+                                                self.cursor.x -= 1;
+                                            }
+                                        } else if self.cursor.x > 0 {
+                                            self.cursor.x -= 1;
+                                        } else if self.cursor.y > 0 {
                                             self.cursor.y -= 1;
                                             self.cursor.x = self.get_width();
                                         }
-                                        while self.cursor.x > 0
-                                            && self.buffer[self.cursor.y].rope[self.cursor.x - 1].0
-                                                == " "
-                                        {
-                                            self.cursor.x -= 1;
-                                        }
-                                        while self.cursor.x > 0
-                                            && self.buffer[self.cursor.y].rope[self.cursor.x - 1].0
-                                                != " "
-                                        {
-                                            self.cursor.x -= 1;
-                                        }
-                                    } else if self.cursor.x > 0 {
-                                        self.cursor.x -= 1;
-                                    } else if self.cursor.y > 0 {
-                                        self.cursor.y -= 1;
-                                        self.cursor.x = self.get_width();
                                     }
-                                }
-                                KeyCode::Right => {
-                                    self.cursor.x = self.cursor.x.min(self.get_width());
-                                    self.update_selection(modifiers);
+                                    KeyCode::Right => {
+                                        self.cursor.x = self.cursor.x.min(self.get_width());
+                                        self.update_selection(modifiers);
 
-                                    if modifiers == KeyModifiers::CONTROL {
-                                        // Move to the end of the word
-                                        if self.cursor.x == self.get_width()
-                                            && self.cursor.y < self.buffer.len() - 1
-                                        {
+                                        if modifiers == KeyModifiers::CONTROL {
+                                            // Move to the end of the word
+                                            if self.cursor.x == self.get_width()
+                                                && self.cursor.y < self.buffer.len() - 1
+                                            {
+                                                self.cursor.y += 1;
+                                                self.cursor.x = 0;
+                                            }
+                                            while self.cursor.x
+                                                < self.buffer[self.cursor.y].rope.len()
+                                                && self.buffer[self.cursor.y].rope[self.cursor.x].0
+                                                    == " "
+                                            {
+                                                self.cursor.x += 1;
+                                            }
+                                            while self.cursor.x
+                                                < self.buffer[self.cursor.y].rope.len()
+                                                && self.buffer[self.cursor.y].rope[self.cursor.x].0
+                                                    != " "
+                                            {
+                                                self.cursor.x += 1;
+                                            }
+                                        } else if self.cursor.x < self.get_width() {
+                                            self.cursor.x += 1;
+                                        } else if self.cursor.y < self.buffer.len() - 1 {
                                             self.cursor.y += 1;
                                             self.cursor.x = 0;
                                         }
-                                        while self.cursor.x < self.buffer[self.cursor.y].rope.len()
-                                            && self.buffer[self.cursor.y].rope[self.cursor.x].0
-                                                == " "
-                                        {
-                                            self.cursor.x += 1;
+                                    }
+
+                                    KeyCode::PageUp => {
+                                        self.update_selection(modifiers);
+                                        self.cursor.y =
+                                            self.cursor.y.saturating_sub(self.height - 2);
+                                    }
+                                    KeyCode::PageDown => {
+                                        self.update_selection(modifiers);
+                                        self.cursor.y = (self.cursor.y + self.height - 2)
+                                            .min(self.buffer.len() - 1);
+                                    }
+                                    KeyCode::Home => {
+                                        self.update_selection(modifiers);
+                                        self.cursor.x = 0;
+                                    }
+                                    KeyCode::End => {
+                                        self.update_selection(modifiers);
+                                        self.cursor.x = self.get_width();
+                                    }
+
+                                    KeyCode::Enter => {
+                                        self.dirty = true;
+
+                                        self.cursor.x = self.cursor.x.min(self.get_width());
+
+                                        if let Some((start, end)) = self.get_selection() {
+                                            self.delete_selection_range(start, end);
                                         }
-                                        while self.cursor.x < self.buffer[self.cursor.y].rope.len()
-                                            && self.buffer[self.cursor.y].rope[self.cursor.x].0
-                                                != " "
-                                        {
-                                            self.cursor.x += 1;
-                                        }
-                                    } else if self.cursor.x < self.get_width() {
-                                        self.cursor.x += 1;
-                                    } else if self.cursor.y < self.buffer.len() - 1 {
+
+                                        let new_line = Row {
+                                            rope: self.buffer[self.cursor.y].rope[self.cursor.x..]
+                                                .to_vec(),
+                                        };
+                                        self.buffer.insert(self.cursor.y + 1, new_line);
+                                        self.buffer[self.cursor.y] = Row {
+                                            rope: self.buffer[self.cursor.y].rope[..self.cursor.x]
+                                                .to_vec(),
+                                        };
                                         self.cursor.y += 1;
                                         self.cursor.x = 0;
                                     }
-                                }
 
-                                KeyCode::PageUp => {
-                                    self.update_selection(modifiers);
-                                    self.cursor.y = self.cursor.y.saturating_sub(self.height - 2);
-                                }
-                                KeyCode::PageDown => {
-                                    self.update_selection(modifiers);
-                                    self.cursor.y = (self.cursor.y + self.height - 2)
-                                        .min(self.buffer.len() - 1);
-                                }
-                                KeyCode::Home => {
-                                    self.update_selection(modifiers);
-                                    self.cursor.x = 0;
-                                }
-                                KeyCode::End => {
-                                    self.update_selection(modifiers);
-                                    self.cursor.x = self.get_width();
-                                }
+                                    KeyCode::Backspace => {
+                                        self.dirty = true;
 
-                                KeyCode::Enter => {
-                                    self.dirty = true;
+                                        self.cursor.x = self.cursor.x.min(self.get_width());
 
-                                    self.cursor.x = self.cursor.x.min(self.get_width());
+                                        if let Some((start, end)) = self.get_selection() {
+                                            self.delete_selection_range(start, end);
+                                        } else if self.cursor.x > 0 {
+                                            // The cursor is in the middle, just delete the char
+                                            self.cursor.x -= 1;
+                                            self.buffer[self.cursor.y].rope.remove(self.cursor.x);
+                                        } else if self.cursor.y > 0 {
+                                            // The cursor is in the beginning, and not at the first line
+                                            // Merge the current line with the previous line
+                                            self.cursor.y -= 1;
+                                            self.cursor.x = self.get_width();
+                                            let mut rope = self.buffer[self.cursor.y].rope.clone();
+                                            rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
+                                            self.buffer[self.cursor.y] = Row { rope };
+                                        }
+                                    }
+                                    KeyCode::Delete => {
+                                        self.dirty = true;
 
-                                    if let Some((start, end)) = self.get_selection() {
-                                        self.delete_selection_range(start, end);
+                                        self.cursor.x = self.cursor.x.min(self.get_width());
+
+                                        if let Some((start, end)) = self.get_selection() {
+                                            self.delete_selection_range(start, end);
+                                        } else if self.cursor.x < self.get_width() {
+                                            // The cursor is in the middle, just delete the char
+                                            self.buffer[self.cursor.y].rope.remove(self.cursor.x);
+                                        } else if self.cursor.y < self.buffer.len() - 1 {
+                                            // The cursor is in the end, and not at the last line
+                                            // Merge the current line with the next line
+                                            let mut rope = self.buffer[self.cursor.y].rope.clone();
+                                            rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
+                                            self.buffer[self.cursor.y] = Row { rope };
+                                        }
                                     }
 
-                                    let new_line = Row {
-                                        rope: self.buffer[self.cursor.y].rope[self.cursor.x..]
-                                            .to_vec(),
-                                    };
-                                    self.buffer.insert(self.cursor.y + 1, new_line);
-                                    self.buffer[self.cursor.y] = Row {
-                                        rope: self.buffer[self.cursor.y].rope[..self.cursor.x]
-                                            .to_vec(),
-                                    };
-                                    self.cursor.y += 1;
-                                    self.cursor.x = 0;
+                                    _ => {}
                                 }
-
-                                KeyCode::Backspace => {
-                                    self.dirty = true;
-
-                                    self.cursor.x = self.cursor.x.min(self.get_width());
-
-                                    if let Some((start, end)) = self.get_selection() {
-                                        self.delete_selection_range(start, end);
-                                    } else if self.cursor.x > 0 {
-                                        // The cursor is in the middle, just delete the char
-                                        self.cursor.x -= 1;
-                                        self.buffer[self.cursor.y].rope.remove(self.cursor.x);
-                                    } else if self.cursor.y > 0 {
-                                        // The cursor is in the beginning, and not at the first line
-                                        // Merge the current line with the previous line
-                                        self.cursor.y -= 1;
-                                        self.cursor.x = self.get_width();
-                                        let mut rope = self.buffer[self.cursor.y].rope.clone();
-                                        rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
-                                        self.buffer[self.cursor.y] = Row { rope };
-                                    }
-                                }
-                                KeyCode::Delete => {
-                                    self.dirty = true;
-
-                                    self.cursor.x = self.cursor.x.min(self.get_width());
-
-                                    if let Some((start, end)) = self.get_selection() {
-                                        self.delete_selection_range(start, end);
-                                    } else if self.cursor.x < self.get_width() {
-                                        // The cursor is in the middle, just delete the char
-                                        self.buffer[self.cursor.y].rope.remove(self.cursor.x);
-                                    } else if self.cursor.y < self.buffer.len() - 1 {
-                                        // The cursor is in the end, and not at the last line
-                                        // Merge the current line with the next line
-                                        let mut rope = self.buffer[self.cursor.y].rope.clone();
-                                        rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
-                                        self.buffer[self.cursor.y] = Row { rope };
-                                    }
-                                }
-
-                                _ => {}
                             }
                         }
-                    },
+                    }
 
                     // Mouse Event
                     Event::Mouse(event) => match event.kind {
@@ -605,10 +615,7 @@ impl Editor {
                 };
                 write!(stdout, "{}", num)?;
             } else {
-                queue!(
-                    stdout,
-                    terminal::Clear(terminal::ClearType::UntilNewLine),
-                )?;
+                queue!(stdout, terminal::Clear(terminal::ClearType::UntilNewLine),)?;
                 write!(
                     stdout,
                     "{} ",
