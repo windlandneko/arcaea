@@ -141,11 +141,12 @@ impl Editor {
                             // viewbox or cursor's movement; delete; enter; etc.
                             (modifiers, code) => {
                                 match code {
+                                    // TODO: Move cursor by visual offset, not logical offset
                                     KeyCode::Up => {
                                         if modifiers == KeyModifiers::ALT {
                                             let (begin, end) = self
                                                 .get_selection()
-                                                .unwrap_or_else(|| (self.cursor, self.cursor));
+                                                .unwrap_or((self.cursor, self.cursor));
                                             if begin.y > 0 {
                                                 for i in begin.y..=end.y {
                                                     self.buffer.swap(i - 1, i);
@@ -172,7 +173,7 @@ impl Editor {
                                         if modifiers == KeyModifiers::ALT {
                                             let (begin, end) = self
                                                 .get_selection()
-                                                .unwrap_or_else(|| (self.cursor, self.cursor));
+                                                .unwrap_or((self.cursor, self.cursor));
                                             if end.y < self.buffer.len() - 1 {
                                                 for i in (begin.y..=end.y).rev() {
                                                     self.buffer.swap(i, i + 1);
@@ -569,7 +570,10 @@ impl Editor {
         // draw debug info on bottom
         self.terminal.write(
             (0, self.terminal.height - 1).into(),
-            self.status_string.clone().on((59, 34, 76).into()),
+            self.status_string
+                .clone()
+                .with((90, 89, 119).into())
+                .on((59, 34, 76).into()),
         );
 
         self.render_sidebar(cursor);

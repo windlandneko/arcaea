@@ -10,7 +10,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{editor::Position, Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Pixel {
+pub struct Pixel {
     /// The style (colors, content attributes).
     style: ContentStyle,
     /// A content to apply the style on.
@@ -26,37 +26,13 @@ impl Default for Pixel {
     }
 }
 
-impl<D: std::fmt::Display> From<StyledContent<D>> for Pixel {
-    fn from(value: StyledContent<D>) -> Self {
-        Self {
-            style: *value.style(),
-            content: value.content().to_string(),
-        }
-    }
-}
-
-impl From<String> for Pixel {
-    fn from(value: String) -> Self {
-        Self {
-            style: ContentStyle::default(),
-            content: value,
-        }
-    }
-}
-
-impl From<Pixel> for StyledContent<String> {
-    fn from(value: Pixel) -> Self {
-        StyledContent::new(value.style, value.content)
-    }
-}
-
 pub struct Terminal {
     stdout: Stdout,
 
     pub height: usize,
     pub width: usize,
 
-    buffer: Vec<Vec<Pixel>>,
+    pub buffer: Vec<Vec<Pixel>>,
     last_buffer: Vec<Vec<Pixel>>,
 }
 
@@ -141,7 +117,7 @@ impl Terminal {
 
                 #[cfg(not(feature = "debug"))]
                 {
-                    if pixel != last_pixel || true {
+                    if pixel != last_pixel {
                         if x != cursor_x {
                             queue!(self.stdout, cursor::MoveTo(x as u16, y as u16))?;
                             cursor_x = x;
