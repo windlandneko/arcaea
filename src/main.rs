@@ -2,6 +2,33 @@ use arcaea::{Editor, Error};
 use crossterm::style::Stylize;
 
 fn main() -> Result<(), Error> {
+    std::panic::set_hook(Box::new(|panic_info| {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableFocusChange,
+            crossterm::event::DisableBracketedPaste,
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::EnableLineWrap,
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        let _ = crossterm::terminal::disable_raw_mode();
+
+        print!("\n{}: ", "Error".bold().red());
+        if let Some(location) = panic_info.location() {
+            println!("{}:{}:{}", location.file(), location.line(), location.column());
+        } else {
+            println!("at unknown location");
+        }
+        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            println!("panic occurred: {s:?}");
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            println!("panic occurred: {s:?}");
+        } else {
+            println!("panic occurred");
+        }
+    }));
+
     let mut arguments = std::env::args();
 
     match (arguments.nth(1), arguments.len()) {
