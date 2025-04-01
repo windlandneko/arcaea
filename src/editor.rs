@@ -1,6 +1,8 @@
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
+    event::{
+        self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    },
     queue,
     style::Stylize,
 };
@@ -9,7 +11,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{style, Error, History, Row, Terminal, Tui};
 
-const EXTRA_GAP: usize = 3;
+const EXTRA_GAP: usize = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Position {
@@ -92,7 +94,10 @@ impl Editor {
 
         self.terminal.init()?;
 
-        self.render()?;
+        if self.check_minimum_window_size() {
+            self.render()?;
+        }
+
         self.event_loop()?;
 
         self.on_exit()?;
@@ -101,10 +106,11 @@ impl Editor {
     }
 
     fn event_loop(&mut self) -> Result<(), Error> {
+        let mut cnt = 0;
+        let mut mouse: Option<MouseEvent> = None;
         loop {
-            if event::poll(std::time::Duration::from_millis(100))? {
-                let mut should_update_viewbox = true;
-
+            let mut should_update_viewbox = true;
+            if event::poll(std::time::Duration::from_millis(25))? {
                 match event::read()? {
                     // Keyboard Event
                     Event::Key(event) if event.kind != KeyEventKind::Release => {
@@ -454,56 +460,11 @@ impl Editor {
 
                         MouseEventKind::Down(MouseButton::Left)
                         | MouseEventKind::Drag(MouseButton::Left) => {
-                            if (event.row as usize) < self.terminal.height - 2 {
-                                self.cursor.y = event.row as usize + self.viewbox.y;
-                                let x = (event.column as usize + self.viewbox.x)
-                                    .saturating_sub(self.sidebar_width);
+                            mouse = Some(event);
+                        }
 
-                                if self.cursor.y >= self.buffer.len() {
-                                    self.cursor.y = self.buffer.len() - 1;
-                                    self.cursor.x = self.get_width();
-                                } else if (event.column as usize) < self.sidebar_width {
-                                    self.cursor.x = 0;
-                                    self.cursor.y = event.row as usize + self.viewbox.y;
-                                    if event.kind == MouseEventKind::Down(MouseButton::Left) {
-                                        self.anchor = Some(self.cursor);
-                                    }
-                                    if self.cursor.y >= self.anchor.unwrap_or(self.cursor).y {
-                                        self.cursor.y += 1;
-                                        if self.cursor.y == self.buffer.len() {
-                                            self.cursor.y = self.buffer.len() - 1;
-                                            self.cursor.x = self.get_width();
-                                        }
-                                    }
-                                } else {
-                                    let visual_width = self.buffer[self.cursor.y]
-                                        .0
-                                        .iter()
-                                        .map(|g| g.1)
-                                        .sum::<usize>();
-                                    if x > visual_width {
-                                        self.cursor.x = self.get_width();
-                                    } else {
-                                        let mut width = 0;
-                                        for (i, cell) in
-                                            self.buffer[self.cursor.y].0.iter().enumerate()
-                                        {
-                                            if width + cell.1 / 2 >= x {
-                                                self.cursor.x = i;
-                                                break;
-                                            }
-                                            width += cell.1;
-                                        }
-                                    }
-
-                                    if event.kind == MouseEventKind::Down(MouseButton::Left)
-                                    // TODO: Make Shift+Drag work
-                                    // && event.modifiers != KeyModifiers::SHIFT
-                                    {
-                                        self.anchor = Some(self.cursor);
-                                    }
-                                }
-                            }
+                        MouseEventKind::Up(MouseButton::Left) => {
+                            mouse = None;
                         }
 
                         _ => {
@@ -516,29 +477,82 @@ impl Editor {
                     }
                     _ => {}
                 }
-
-                let c = self.get_cursor_position();
-                self.status_string = format!(
-                    " viewbox: ({}, {}) | cursor: ({}, {}) @ {:?} | view cursor: ({}, {})",
-                    self.viewbox.y + 1,
-                    self.viewbox.x + 1,
-                    self.cursor.y + 1,
-                    self.cursor.x + 1,
-                    self.anchor.map(|a| (a.y + 1, a.x + 1)),
-                    c.y + 1,
-                    c.x + 1
-                );
-
-                if !self.check_minimum_window_size() {
-                    continue;
-                }
-
-                if should_update_viewbox {
-                    self.update_viewbox();
-                }
-
-                self.render()?;
             }
+
+            if let Some(event) = mouse {
+                if (event.row as usize) < self.terminal.height - 2 {
+                    self.cursor.y = event.row as usize + self.viewbox.y;
+                    let x =
+                        (event.column as usize + self.viewbox.x).saturating_sub(self.sidebar_width);
+
+                    if self.cursor.y >= self.buffer.len() {
+                        self.cursor.y = self.buffer.len() - 1;
+                        self.cursor.x = self.get_width();
+                    } else if (event.column as usize) < self.sidebar_width {
+                        self.cursor.x = 0;
+                        self.cursor.y = event.row as usize + self.viewbox.y;
+                        if event.kind == MouseEventKind::Down(MouseButton::Left) {
+                            // self.anchor = Some(self.cursor);
+                            should_update_viewbox = false;
+                        }
+                        if self.cursor.y >= self.anchor.unwrap_or(self.cursor).y {
+                            self.cursor.y += 1;
+                            if self.cursor.y == self.buffer.len() {
+                                self.cursor.y = self.buffer.len() - 1;
+                                self.cursor.x = self.get_width();
+                            }
+                        }
+                    } else {
+                        let visual_width = self.buffer[self.cursor.y]
+                            .0
+                            .iter()
+                            .map(|g| g.1)
+                            .sum::<usize>();
+                        if x > visual_width {
+                            self.cursor.x = self.get_width();
+                        } else {
+                            let mut width = 0;
+                            for (i, cell) in self.buffer[self.cursor.y].0.iter().enumerate() {
+                                if width + cell.1 / 2 >= x {
+                                    self.cursor.x = i;
+                                    break;
+                                }
+                                width += cell.1;
+                            }
+                        }
+                    }
+
+                    // TODO: Make Shift+Drag work
+                    // && event.modifiers != KeyModifiers::SHIFT
+                    if event.kind == MouseEventKind::Down(MouseButton::Left) {
+                        self.anchor = Some(self.cursor);
+                    }
+                }
+            }
+
+            let c = self.get_cursor_position();
+            self.status_string = format!(
+                " viewbox: ({}, {}) | cursor: ({}, {}) @ {:?} | view cursor: ({}, {}) | Frame = {}",
+                self.viewbox.y + 1,
+                self.viewbox.x + 1,
+                self.cursor.y + 1,
+                self.cursor.x + 1,
+                self.anchor.map(|a| (a.y + 1, a.x + 1)),
+                c.y + 1,
+                c.x + 1,
+                cnt,
+            );
+            cnt += 1;
+
+            if !self.check_minimum_window_size() {
+                continue;
+            }
+
+            if should_update_viewbox {
+                self.update_viewbox();
+            }
+
+            self.render()?;
         }
 
         Ok(())
@@ -547,12 +561,12 @@ impl Editor {
     fn delete_selection_range(&mut self, begin: Position, end: Position) {
         // Range delete
         self.buffer[begin.y] = Row(self.buffer[begin.y]
-                .0
-                .iter()
-                .take(begin.x)
-                .chain(self.buffer[end.y].0.iter().skip(end.x))
-                .cloned()
-                .collect());
+            .0
+            .iter()
+            .take(begin.x)
+            .chain(self.buffer[end.y].0.iter().skip(end.x))
+            .cloned()
+            .collect());
         for index in (begin.y + 1..=end.y).rev() {
             self.buffer.remove(index);
         }
