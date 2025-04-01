@@ -7,7 +7,7 @@ use crossterm::{
 use std::io::{self, Write};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::{style, Error, Row, Terminal, Tui};
+use crate::{style, Error, History, Row, Terminal, Tui};
 
 const EXTRA_GAP: usize = 3;
 
@@ -138,7 +138,7 @@ impl Editor {
                                     self.delete_selection_range(begin, end);
                                 }
 
-                                self.buffer[self.cursor.y].rope.insert(
+                                self.buffer[self.cursor.y].0.insert(
                                     self.cursor.x,
                                     (char.to_string(), char.width().unwrap_or(0)),
                                 );
@@ -219,17 +219,13 @@ impl Editor {
                                                 self.cursor.x = self.get_width();
                                             }
                                             while self.cursor.x > 0
-                                                && self.buffer[self.cursor.y].rope
-                                                    [self.cursor.x - 1]
-                                                    .0
+                                                && self.buffer[self.cursor.y].0[self.cursor.x - 1].0
                                                     == " "
                                             {
                                                 self.cursor.x -= 1;
                                             }
                                             while self.cursor.x > 0
-                                                && self.buffer[self.cursor.y].rope
-                                                    [self.cursor.x - 1]
-                                                    .0
+                                                && self.buffer[self.cursor.y].0[self.cursor.x - 1].0
                                                     != " "
                                             {
                                                 self.cursor.x -= 1;
@@ -253,16 +249,14 @@ impl Editor {
                                                 self.cursor.y += 1;
                                                 self.cursor.x = 0;
                                             }
-                                            while self.cursor.x
-                                                < self.buffer[self.cursor.y].rope.len()
-                                                && self.buffer[self.cursor.y].rope[self.cursor.x].0
+                                            while self.cursor.x < self.buffer[self.cursor.y].0.len()
+                                                && self.buffer[self.cursor.y].0[self.cursor.x].0
                                                     == " "
                                             {
                                                 self.cursor.x += 1;
                                             }
-                                            while self.cursor.x
-                                                < self.buffer[self.cursor.y].rope.len()
-                                                && self.buffer[self.cursor.y].rope[self.cursor.x].0
+                                            while self.cursor.x < self.buffer[self.cursor.y].0.len()
+                                                && self.buffer[self.cursor.y].0[self.cursor.x].0
                                                     != " "
                                             {
                                                 self.cursor.x += 1;
@@ -303,15 +297,13 @@ impl Editor {
                                             self.delete_selection_range(begin, end);
                                         }
 
-                                        let new_line = Row {
-                                            rope: self.buffer[self.cursor.y].rope[self.cursor.x..]
-                                                .to_vec(),
-                                        };
+                                        let new_line = Row(self.buffer[self.cursor.y].0
+                                            [self.cursor.x..]
+                                            .to_vec());
                                         self.buffer.insert(self.cursor.y + 1, new_line);
-                                        self.buffer[self.cursor.y] = Row {
-                                            rope: self.buffer[self.cursor.y].rope[..self.cursor.x]
-                                                .to_vec(),
-                                        };
+                                        self.buffer[self.cursor.y] =
+                                            Row(self.buffer[self.cursor.y].0[..self.cursor.x]
+                                                .to_vec());
                                         self.cursor.y += 1;
                                         self.cursor.x = 0;
                                     }
@@ -333,15 +325,15 @@ impl Editor {
                                         } else if self.cursor.x > 0 {
                                             // The cursor is in the middle, just delete the char
                                             self.cursor.x -= 1;
-                                            self.buffer[self.cursor.y].rope.remove(self.cursor.x);
+                                            self.buffer[self.cursor.y].0.remove(self.cursor.x);
                                         } else if self.cursor.y > 0 {
                                             // The cursor is in the beginning, and not at the first line
                                             // Merge the current line with the previous line
                                             self.cursor.y -= 1;
                                             self.cursor.x = self.get_width();
-                                            let mut rope = self.buffer[self.cursor.y].rope.clone();
-                                            rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
-                                            self.buffer[self.cursor.y] = Row { rope };
+                                            let mut row = self.buffer[self.cursor.y].0.clone();
+                                            row.extend(self.buffer.remove(self.cursor.y + 1).0);
+                                            self.buffer[self.cursor.y] = Row(row);
                                         }
                                     }
                                     KeyCode::Delete => {
@@ -360,13 +352,13 @@ impl Editor {
                                             self.delete_selection_range(begin, end);
                                         } else if self.cursor.x < self.get_width() {
                                             // The cursor is in the middle, just delete the char
-                                            self.buffer[self.cursor.y].rope.remove(self.cursor.x);
+                                            self.buffer[self.cursor.y].0.remove(self.cursor.x);
                                         } else if self.cursor.y < self.buffer.len() - 1 {
                                             // The cursor is in the end, and not at the last line
                                             // Merge the current line with the next line
-                                            let mut rope = self.buffer[self.cursor.y].rope.clone();
-                                            rope.extend(self.buffer.remove(self.cursor.y + 1).rope);
-                                            self.buffer[self.cursor.y] = Row { rope };
+                                            let mut row = self.buffer[self.cursor.y].0.clone();
+                                            row.extend(self.buffer.remove(self.cursor.y + 1).0);
+                                            self.buffer[self.cursor.y] = Row(row);
                                         }
                                     }
 
@@ -442,7 +434,7 @@ impl Editor {
                                     } else {
                                         let mut width = 0;
                                         for (i, cell) in
-                                            self.buffer[self.cursor.y].rope.iter().enumerate()
+                                            self.buffer[self.cursor.y].0.iter().enumerate()
                                         {
                                             if width + cell.1 / 2 >= x {
                                                 self.cursor.x = i;
@@ -503,11 +495,11 @@ impl Editor {
     fn delete_selection_range(&mut self, begin: Position, end: Position) {
         // Range delete
         self.buffer[begin.y] = Row {
-            rope: self.buffer[begin.y]
-                .rope
+            0: self.buffer[begin.y]
+                .0
                 .iter()
                 .take(begin.x)
-                .chain(self.buffer[end.y].rope.iter().skip(end.x))
+                .chain(self.buffer[end.y].0.iter().skip(end.x))
                 .cloned()
                 .collect(),
         };
@@ -592,7 +584,7 @@ impl Editor {
         for line_number in begin..end {
             let mut dx = self.sidebar_width as isize - self.viewbox.x as isize;
             for (i, (g, w)) in self.buffer[line_number]
-                .rope
+                .0
                 .iter()
                 .chain([&(" ".to_string(), 1)]) // Append a virtual space to the end of the line
                 .enumerate()
@@ -721,7 +713,7 @@ impl Editor {
     fn get_cursor_position(&self) -> Position {
         Position {
             x: self.buffer[self.cursor.y]
-                .rope
+                .0
                 .iter()
                 .take(self.cursor.x)
                 .map(|g| g.1)

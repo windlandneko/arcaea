@@ -4,17 +4,16 @@ use unicode_width::UnicodeWidthStr;
 
 type Cell = (String, usize);
 
-pub struct Row {
-    pub rope: Vec<Cell>,
-}
+#[derive(Default)]
+pub struct Row(pub Vec<Cell>);
 
 impl Row {
     pub fn len(&self) -> usize {
-        self.rope.len()
+        self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rope.is_empty()
+        self.0.is_empty()
     }
 }
 
@@ -23,21 +22,18 @@ impl fmt::Display for Row {
         write!(
             f,
             "{}",
-            self.rope
-                .iter()
-                .map(|(g, _)| g.as_str())
-                .collect::<String>()
+            self.0.iter().map(|(g, _)| g.as_str()).collect::<String>()
         )
     }
 }
 
 impl From<String> for Row {
     fn from(string: String) -> Self {
-        Self {
-            rope: string
+        Self(
+            string
                 .graphemes(true)
                 .map(|g| (g.to_string(), g.width()))
                 .collect(),
-        }
+        )
     }
 }

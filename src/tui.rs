@@ -35,7 +35,7 @@ impl Input {
                     Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
                         KeyCode::Char(c) => {
                             self.input
-                                .rope
+                                .0
                                 .push((c.to_string(), c.width().unwrap_or(0)));
                         }
                         KeyCode::Esc => {
@@ -46,7 +46,7 @@ impl Input {
                         }
 
                         KeyCode::Backspace => {
-                            self.input.rope.pop();
+                            self.input.0.pop();
                         }
                         _ => {}
                     },
