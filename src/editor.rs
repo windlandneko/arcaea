@@ -87,12 +87,8 @@ impl Editor {
             self.dirty = true;
         }
 
-        self.history.push_state(
-            &self.buffer,
-            self.viewbox,
-            self.cursor,
-            self.anchor,
-        );
+        self.history
+            .push_state(&self.buffer, self.viewbox, self.cursor, self.anchor);
 
         self.terminal.init()?;
 
@@ -805,12 +801,8 @@ impl Editor {
     }
 
     fn create_history(&mut self) {
-        self.history.push_state(
-            &self.buffer,
-            self.viewbox,
-            self.cursor,
-            self.anchor,
-        );
+        self.history
+            .push_state(&self.buffer, self.viewbox, self.cursor, self.anchor);
     }
     fn update_last_history_state(&mut self) {
         self.history

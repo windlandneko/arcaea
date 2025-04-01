@@ -105,28 +105,6 @@ impl Terminal {
         let mut current_style = ContentStyle::default();
         queue!(self.stdout, cursor::SavePosition, style::ResetColor)?;
 
-        let buffer_str = self
-            .buffer
-            .iter()
-            .zip(self.last_buffer.iter())
-            .map(|(current_row, last_row)| {
-                current_row
-                    .iter()
-                    .zip(last_row.iter())
-                    .map(|(pixel, last_pixel)| {
-                        if pixel != last_pixel {
-                            pixel.content.clone()
-                        } else {
-                            ".".to_string()
-                        }
-                    })
-                    .collect::<String>()
-            })
-            .collect::<Vec<String>>()
-            .join("\n");
-        std::fs::write("buffer.txt", buffer_str)
-            .unwrap_or_else(|_| eprintln!("Failed to write buffer.txt"));
-
         for (y, row) in self.buffer.iter().enumerate() {
             let mut next_char = 0;
             let mut cursor_x = 0;
@@ -197,9 +175,10 @@ impl Terminal {
             }
             for i in 0..width {
                 let pixel = &mut self.buffer[pos.y][pos.x + i];
-                pixel.content = ch.to_string();
+                pixel.content = String::new();
                 pixel.style = *content.style();
             }
+            self.buffer[pos.y][pos.x].content = ch.to_string();
             pos.x += width;
         }
     }
@@ -212,8 +191,9 @@ impl Terminal {
         }
         for i in 0..width {
             let pixel = &mut self.buffer[pos.y][pos.x + i];
-            pixel.content = ch.to_string();
+            pixel.content = String::new();
             pixel.style = *content.style();
         }
+        self.buffer[pos.y][pos.x].content = ch.to_string();
     }
 }
