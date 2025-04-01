@@ -85,8 +85,6 @@ impl Editor {
         } else {
             self.buffer = Vec::new();
             self.buffer.push(Row::from(""));
-
-            self.dirty = true;
         }
 
         self.history
@@ -569,10 +567,8 @@ impl Editor {
                     }
                     _ => {}
                 }
-            } else {
-                if mouse.is_none() {
-                    should_update_viewbox = false;
-                }
+            } else if mouse.is_none() {
+                should_update_viewbox = false;
             }
 
             if let Some(event) = mouse {
@@ -593,7 +589,8 @@ impl Editor {
                             dragging_sidebar = true;
                             should_update_viewbox = false;
                         }
-                        if dragging_sidebar && self.cursor.y >= self.anchor.unwrap_or(self.cursor).y {
+                        if dragging_sidebar && self.cursor.y >= self.anchor.unwrap_or(self.cursor).y
+                        {
                             self.cursor.y += 1;
                             if self.cursor.y >= self.buffer.len() {
                                 self.cursor.y = self.buffer.len() - 1;
@@ -713,6 +710,14 @@ impl Editor {
 
         // draw statusbar
         {
+            const LOGO_WIDTH: usize = 8;
+            self.terminal.write(
+                (0, self.terminal.height - 2).into(),
+                " ARCAEA "
+                    .to_string()
+                    .with(style::text_primary)
+                    .on(style::background_primary),
+            );
             let content_left = format!(" {}", self.filename.as_deref().unwrap_or("Untitled"));
             let content_left = if self.dirty {
                 format!("{} (未保存)", content_left)
@@ -721,15 +726,20 @@ impl Editor {
             };
             let content_right = format!("行 {}，列 {} ", self.cursor.y + 1, self.cursor.x + 1);
             self.terminal.write(
-                (0, self.terminal.height.saturating_sub(2)).into(),
+                (LOGO_WIDTH, self.terminal.height.saturating_sub(2)).into(),
                 format!(
                     "{}{}{}",
                     content_left,
-                    " ".repeat(self.terminal.width - content_left.width() - content_right.width()),
+                    " ".repeat(
+                        self.terminal.width
+                            - content_left.width()
+                            - content_right.width()
+                            - LOGO_WIDTH
+                    ),
                     content_right,
                 )
-                .with(style::text_primary)
-                .on(style::background_primary),
+                .with(style::text_statusbar)
+                .on(style::background_sidebar),
             );
         }
 
@@ -738,7 +748,7 @@ impl Editor {
             (0, self.terminal.height - 1).into(),
             self.status_string
                 .clone()
-                .with(style::text_linenum)
+                .with(style::text_sidebar)
                 .on(style::background),
         );
 
@@ -853,17 +863,18 @@ impl Editor {
                     width = self.sidebar_width - 1
                 );
                 let num = if i + self.viewbox.y == cursor.y {
-                    lineno.with(style::text_linenum_selected)
+                    lineno.with(style::text_sidebar_selected)
                 } else {
-                    lineno.with(style::text_linenum)
+                    lineno.with(style::text_sidebar)
                 };
                 self.terminal
-                    .write((0, i).into(), num.on(style::background));
+                    .write((0, i).into(), num.on(style::background_sidebar));
             } else {
                 self.terminal.write(
                     (0, i).into(),
                     format!("{:>width$} ", "~", width = self.sidebar_width - 1)
-                        .with(style::text_linenum),
+                        .with(style::text_sidebar)
+                        .on(style::background_sidebar),
                 );
             }
         }
