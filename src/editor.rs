@@ -638,7 +638,7 @@ impl Editor {
             for (i, (g, w)) in self.buffer[line_number]
                 .0
                 .iter()
-                .chain([&(" ".to_string(), 1)]) // Append a virtual space to the end of the line
+                .chain([&("\n".to_string(), 1)]) // Append a virtual space to the end of the line
                 .enumerate()
             {
                 dx += *w as isize;
@@ -646,6 +646,7 @@ impl Editor {
                     break;
                 }
                 if dx >= (self.sidebar_width + w) as isize {
+                    let mut str = g.as_str();
                     let fg_color = style::text;
                     let mut bg_color = style::background;
 
@@ -653,11 +654,18 @@ impl Editor {
                         let current = (i, line_number).into();
                         if begin <= current && current < end {
                             bg_color = style::background_selected;
+                            // if str == " " {
+                            //     str = "•";
+                            //     g_color = style::text_selected_whitespace;
+                            // }
                         }
+                    }
+                    if str == "\n" {
+                        str = " ";
                     }
                     self.terminal.write_char(
                         (dx as usize - w, line_number - self.viewbox.y).into(),
-                        g.as_str().with(fg_color).on(bg_color),
+                        str.with(fg_color).on(bg_color),
                     );
                 }
             }
