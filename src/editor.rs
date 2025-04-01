@@ -568,7 +568,9 @@ impl Editor {
                     _ => {}
                 }
             } else {
-                should_update_viewbox = false;
+                if mouse.is_none() {
+                    should_update_viewbox = false;
+                }
             }
 
             if let Some(event) = mouse {
@@ -580,11 +582,12 @@ impl Editor {
                     if self.cursor.y >= self.buffer.len() {
                         self.cursor.y = self.buffer.len() - 1;
                         self.cursor.x = self.get_width();
-                    } else if (event.column as usize) < self.sidebar_width {
+                    }
+                    if (event.column as usize) < self.sidebar_width {
                         self.cursor.x = 0;
                         self.cursor.y = event.row as usize + self.viewbox.y;
                         if event.kind == MouseEventKind::Down(MouseButton::Left) {
-                            // self.anchor = Some(self.cursor);
+                            self.anchor = Some(self.cursor);
                             should_update_viewbox = false;
                         }
                         if self.cursor.y >= self.anchor.unwrap_or(self.cursor).y {
@@ -594,32 +597,34 @@ impl Editor {
                                 self.cursor.x = self.get_width();
                             }
                         }
-                    } else if event.column + 1 >= self.terminal.width as u16 {
-                        self.cursor.x = self.get_width();
                     } else {
-                        let visual_width = self.buffer[self.cursor.y]
-                            .0
-                            .iter()
-                            .map(|g| g.1)
-                            .sum::<usize>();
-                        if x > visual_width {
+                        if event.column + 1 >= self.terminal.width as u16 {
                             self.cursor.x = self.get_width();
                         } else {
-                            let mut width = 0;
-                            for (i, cell) in self.buffer[self.cursor.y].0.iter().enumerate() {
-                                if width >= x {
-                                    self.cursor.x = i;
-                                    break;
+                            let visual_width = self.buffer[self.cursor.y]
+                                .0
+                                .iter()
+                                .map(|g| g.1)
+                                .sum::<usize>();
+                            if x > visual_width {
+                                self.cursor.x = self.get_width();
+                            } else {
+                                let mut width = 0;
+                                for (i, cell) in self.buffer[self.cursor.y].0.iter().enumerate() {
+                                    if width >= x {
+                                        self.cursor.x = i;
+                                        break;
+                                    }
+                                    width += cell.1;
                                 }
-                                width += cell.1;
                             }
                         }
-                    }
 
-                    // TODO: Make Shift+Drag work
-                    // && event.modifiers != KeyModifiers::SHIFT
-                    if event.kind == MouseEventKind::Down(MouseButton::Left) {
-                        self.anchor = Some(self.cursor);
+                        // TODO: Make Shift+Drag work
+                        // && event.modifiers != KeyModifiers::SHIFT
+                        if event.kind == MouseEventKind::Down(MouseButton::Left) {
+                            self.anchor = Some(self.cursor);
+                        }
                     }
                 }
             }
