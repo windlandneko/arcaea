@@ -170,7 +170,7 @@ impl Terminal {
     pub fn write(&mut self, mut pos: Position, content: StyledContent<String>) {
         for ch in content.content().graphemes(true) {
             let width = ch.width();
-            if pos.x + width >= self.width || pos.y >= self.height {
+            if pos.x + width > self.width || pos.y >= self.height {
                 break;
             }
             for i in 0..width {
@@ -186,7 +186,7 @@ impl Terminal {
     pub fn write_char(&mut self, pos: Position, content: StyledContent<&str>) {
         let ch = &content.content();
         let width = ch.width();
-        if pos.x + width >= self.width || pos.y >= self.height {
+        if pos.x + width > self.width || pos.y >= self.height {
             return;
         }
         for i in 0..width {
