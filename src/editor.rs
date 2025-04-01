@@ -502,6 +502,8 @@ impl Editor {
                                 self.cursor.x = self.get_width();
                             }
                         }
+                    } else if event.column + 1 >= self.terminal.width as u16 {
+                        self.cursor.x = self.get_width();
                     } else {
                         let visual_width = self.buffer[self.cursor.y]
                             .0
@@ -513,7 +515,7 @@ impl Editor {
                         } else {
                             let mut width = 0;
                             for (i, cell) in self.buffer[self.cursor.y].0.iter().enumerate() {
-                                if width + cell.1 / 2 >= x {
+                                if width >= x {
                                     self.cursor.x = i;
                                     break;
                                 }
