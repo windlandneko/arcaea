@@ -60,7 +60,7 @@ pub struct Editor {
 
     dirty: bool,
 
-    history: History,
+    history: History<Row>,
 }
 
 impl Editor {
@@ -86,6 +86,13 @@ impl Editor {
 
             self.dirty = true;
         }
+
+        self.history.push_state(
+            &self.buffer,
+            self.viewbox,
+            self.cursor,
+            self.anchor,
+        );
 
         self.terminal.init()?;
 
@@ -130,8 +137,29 @@ impl Editor {
                                 should_update_viewbox = false;
                             }
 
+                            // Undo
+                            (KeyModifiers::CONTROL, KeyCode::Char('z' | 'Z')) => {
+                                if self.history.undo() {
+                                    self.buffer = self.history.current.clone();
+                                    self.viewbox = self.history.current_state.viewbox;
+                                    self.cursor = self.history.current_state.cursor;
+                                    self.anchor = self.history.current_state.anchor;
+                                }
+                            }
+
+                            // Redo
+                            (KeyModifiers::CONTROL, KeyCode::Char('y' | 'Y')) => {
+                                if self.history.redo() {
+                                    self.buffer = self.history.current.clone();
+                                    self.viewbox = self.history.current_state.viewbox;
+                                    self.cursor = self.history.current_state.cursor;
+                                    self.anchor = self.history.current_state.anchor;
+                                }
+                            }
+
                             // Regular character input
                             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(char)) => {
+                                self.update_last_history_state();
                                 self.dirty = true;
 
                                 self.cursor.x = self.cursor.x.min(self.get_width());
@@ -145,6 +173,8 @@ impl Editor {
                                     (char.to_string(), char.width().unwrap_or(0)),
                                 );
                                 self.cursor.x += 1;
+
+                                self.create_history();
                             }
 
                             // Control character input
@@ -158,12 +188,17 @@ impl Editor {
                                                 .get_selection()
                                                 .unwrap_or((self.cursor, self.cursor));
                                             if begin.y > 0 {
+                                                self.update_last_history_state();
+                                                self.dirty = true;
+
                                                 for i in begin.y..=end.y {
                                                     self.buffer.swap(i - 1, i);
                                                 }
                                                 if let Some(anchor) = &mut self.anchor {
                                                     anchor.y -= 1;
                                                 }
+
+                                                self.create_history();
                                             }
                                         } else {
                                             self.update_selection(modifiers);
@@ -185,12 +220,17 @@ impl Editor {
                                                 .get_selection()
                                                 .unwrap_or((self.cursor, self.cursor));
                                             if end.y < self.buffer.len() - 1 {
+                                                self.update_last_history_state();
+                                                self.dirty = true;
+
                                                 for i in (begin.y..=end.y).rev() {
                                                     self.buffer.swap(i, i + 1);
                                                 }
                                                 if let Some(anchor) = &mut self.anchor {
                                                     anchor.y += 1;
                                                 }
+
+                                                self.create_history();
                                             }
                                         } else {
                                             self.update_selection(modifiers);
@@ -291,6 +331,7 @@ impl Editor {
                                     }
 
                                     KeyCode::Enter => {
+                                        self.update_last_history_state();
                                         self.dirty = true;
 
                                         self.cursor.x = self.cursor.x.min(self.get_width());
@@ -308,9 +349,12 @@ impl Editor {
                                                 .to_vec());
                                         self.cursor.y += 1;
                                         self.cursor.x = 0;
+
+                                        self.create_history();
                                     }
 
                                     KeyCode::Backspace => {
+                                        self.update_last_history_state();
                                         self.dirty = true;
 
                                         self.cursor.x = self.cursor.x.min(self.get_width());
@@ -337,8 +381,11 @@ impl Editor {
                                             row.extend(self.buffer.remove(self.cursor.y + 1).0);
                                             self.buffer[self.cursor.y] = Row(row);
                                         }
+
+                                        self.create_history();
                                     }
                                     KeyCode::Delete => {
+                                        self.update_last_history_state();
                                         self.dirty = true;
 
                                         self.cursor.x = self.cursor.x.min(self.get_width());
@@ -362,6 +409,8 @@ impl Editor {
                                             row.extend(self.buffer.remove(self.cursor.y + 1).0);
                                             self.buffer[self.cursor.y] = Row(row);
                                         }
+
+                                        self.create_history();
                                     }
 
                                     _ => {}
@@ -431,7 +480,12 @@ impl Editor {
                                         }
                                     }
                                 } else {
-                                    if x > self.get_width() {
+                                    let visual_width = self.buffer[self.cursor.y]
+                                        .0
+                                        .iter()
+                                        .map(|g| g.1)
+                                        .sum::<usize>();
+                                    if x > visual_width {
                                         self.cursor.x = self.get_width();
                                     } else {
                                         let mut width = 0;
@@ -750,13 +804,28 @@ impl Editor {
         );
     }
 
-    pub fn on_exit(&mut self) -> Result<(), Error> {
+    fn create_history(&mut self) {
+        self.history.push_state(
+            &self.buffer,
+            self.viewbox,
+            self.cursor,
+            self.anchor,
+        );
+    }
+    fn update_last_history_state(&mut self) {
+        self.history
+            .update_state(self.viewbox, self.cursor, self.anchor);
+    }
+
+    fn on_exit(&mut self) -> Result<(), Error> {
         self.terminal.cleanup()?;
 
         Ok(())
     }
 
-    pub fn save_file(&mut self) -> Result<(), Error> {
+    fn save_file(&mut self) -> Result<(), Error> {
+        self.update_last_history_state();
+
         if self.filename.is_none() {
             self.filename = Tui::prompt_filename()?;
         }
@@ -767,11 +836,17 @@ impl Editor {
 
         std::fs::write(
             self.filename.clone().unwrap(),
-            self.buffer.iter().map(|line| line.to_string()).collect::<Vec<_>>().join("\n"),
+            self.buffer
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
         )?;
         // TODO: Option to save with \r\n
 
         self.dirty = false;
+
+        self.create_history();
         Ok(())
     }
 }

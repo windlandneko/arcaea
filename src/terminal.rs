@@ -60,7 +60,7 @@ impl Terminal {
         execute!(
             self.stdout,
             terminal::EnterAlternateScreen,
-            // terminal::DisableLineWrap,
+            terminal::DisableLineWrap,
             event::EnableMouseCapture,
             event::EnableBracketedPaste,
             event::EnableFocusChange,
@@ -74,7 +74,7 @@ impl Terminal {
             event::DisableFocusChange,
             event::DisableBracketedPaste,
             event::DisableMouseCapture,
-            // terminal::EnableLineWrap,
+            terminal::EnableLineWrap,
             terminal::LeaveAlternateScreen
         )?;
         terminal::disable_raw_mode()?;
@@ -104,6 +104,28 @@ impl Terminal {
     pub fn end_render(&mut self) -> Result<(), Error> {
         let mut current_style = ContentStyle::default();
         queue!(self.stdout, cursor::SavePosition, style::ResetColor)?;
+
+        let buffer_str = self
+            .buffer
+            .iter()
+            .zip(self.last_buffer.iter())
+            .map(|(current_row, last_row)| {
+                current_row
+                    .iter()
+                    .zip(last_row.iter())
+                    .map(|(pixel, last_pixel)| {
+                        if pixel != last_pixel {
+                            pixel.content.clone()
+                        } else {
+                            ".".to_string()
+                        }
+                    })
+                    .collect::<String>()
+            })
+            .collect::<Vec<String>>()
+            .join("\n");
+        std::fs::write("buffer.txt", buffer_str)
+            .unwrap_or_else(|_| eprintln!("Failed to write buffer.txt"));
 
         for (y, row) in self.buffer.iter().enumerate() {
             let mut next_char = 0;
