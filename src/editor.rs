@@ -108,6 +108,7 @@ impl Editor {
     fn event_loop(&mut self) -> Result<(), Error> {
         let mut cnt = 0;
         let mut mouse: Option<MouseEvent> = None;
+        let mut dragging_sidebar = false;
         loop {
             let mut should_update_viewbox = true;
             if event::poll(std::time::Duration::from_millis(25))? {
@@ -538,6 +539,7 @@ impl Editor {
 
                         MouseEventKind::Up(MouseButton::Left) => {
                             mouse = None;
+                            dragging_sidebar = false;
                         }
 
                         MouseEventKind::Down(MouseButton::Right) => {
@@ -588,11 +590,12 @@ impl Editor {
                         self.cursor.y = event.row as usize + self.viewbox.y;
                         if event.kind == MouseEventKind::Down(MouseButton::Left) {
                             self.anchor = Some(self.cursor);
+                            dragging_sidebar = true;
                             should_update_viewbox = false;
                         }
-                        if self.cursor.y >= self.anchor.unwrap_or(self.cursor).y {
+                        if dragging_sidebar && self.cursor.y >= self.anchor.unwrap_or(self.cursor).y {
                             self.cursor.y += 1;
-                            if self.cursor.y == self.buffer.len() {
+                            if self.cursor.y >= self.buffer.len() {
                                 self.cursor.y = self.buffer.len() - 1;
                                 self.cursor.x = self.get_width();
                             }
