@@ -78,7 +78,7 @@ impl Editor {
         if let Some(name) = filename {
             self.buffer = std::fs::read_to_string(name)?
                 .split('\n')
-                .map(|s| Row::from(s))
+                .map(Row::from)
                 .collect();
         } else {
             self.buffer = Vec::new();
@@ -546,15 +546,13 @@ impl Editor {
 
     fn delete_selection_range(&mut self, begin: Position, end: Position) {
         // Range delete
-        self.buffer[begin.y] = Row {
-            0: self.buffer[begin.y]
+        self.buffer[begin.y] = Row(self.buffer[begin.y]
                 .0
                 .iter()
                 .take(begin.x)
                 .chain(self.buffer[end.y].0.iter().skip(end.x))
                 .cloned()
-                .collect(),
-        };
+                .collect());
         for index in (begin.y + 1..=end.y).rev() {
             self.buffer.remove(index);
         }

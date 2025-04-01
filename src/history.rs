@@ -84,6 +84,12 @@ where
         cursor: Position,
         anchor: Option<Position>,
     ) {
+        if self.state.len() > 1000 {
+            self.state.remove(0);
+            self.buffer.remove(0);
+            self.version -= 1;
+        }
+
         let v = self.version;
         let old_len = self.current.len();
         let new_len = item.len();
@@ -132,12 +138,7 @@ where
 
     /// Push a new state to the history.
     /// If the current version isn't the newest, it will truncate the history to the current version.
-    pub fn update_state(
-        &mut self,
-        viewbox: Position,
-        cursor: Position,
-        anchor: Option<Position>,
-    ) {
+    pub fn update_state(&mut self, viewbox: Position, cursor: Position, anchor: Option<Position>) {
         let v = self.version;
 
         if v > 0 {
