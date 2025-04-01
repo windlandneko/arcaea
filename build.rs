@@ -4,6 +4,7 @@ fn commit_info_from_git() -> Option<String> {
     Command::new("git")
         .args([
             "log",
+            "-n 1",
             "--date=short",
             "--format= (%h %cd)",
             "--abbrev=8",
