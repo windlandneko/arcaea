@@ -79,7 +79,7 @@ impl Editor {
 
         if let Some(name) = filename {
             self.buffer = std::fs::read_to_string(name)?
-                .split('\n')
+                .lines()
                 .map(Row::from)
                 .collect();
         } else {
@@ -159,6 +159,33 @@ impl Editor {
                                 }
                             }
 
+                            // Copy & Cut
+                            (KeyModifiers::CONTROL, KeyCode::Char('c' | 'C' | 'x' | 'X')) => {
+                                self.trigger_copy()?;
+
+                                if event.code == KeyCode::Char('x')
+                                    || event.code == KeyCode::Char('X')
+                                {
+                                    self.update_last_history_state();
+                                    self.dirty = true;
+                                    if let Some((begin, end)) = self.get_selection() {
+                                        self.delete_selection_range(begin, end);
+                                    } else {
+                                        // Just delete the current line
+                                        self.delete_selection_range(
+                                            (0, self.cursor.y).into(),
+                                            (self.get_width(), self.cursor.y).into(),
+                                        );
+                                    }
+                                    self.create_history();
+                                }
+                            }
+
+                            // Paste
+                            (KeyModifiers::CONTROL, KeyCode::Char('v' | 'V')) => {
+                                self.trigger_paste()?
+                            }
+
                             // Regular character input
                             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(char)) => {
                                 self.update_last_history_state();
@@ -185,78 +212,118 @@ impl Editor {
                                 match code {
                                     // TODO: Move cursor by visual offset, not logical offset
                                     KeyCode::Up => {
-                                        if modifiers == KeyModifiers::ALT {
+                                        if modifiers == KeyModifiers::ALT | KeyModifiers::SHIFT {
                                             let (begin, end) = self
                                                 .get_selection()
                                                 .unwrap_or((self.cursor, self.cursor));
-                                            if begin.y > 0 {
-                                                self.update_last_history_state();
-                                                self.dirty = true;
+                                            self.update_last_history_state();
+                                            self.dirty = true;
 
-                                                for i in begin.y..=end.y {
-                                                    self.buffer.swap(i - 1, i);
-                                                }
-                                                if let Some(anchor) = &mut self.anchor {
-                                                    anchor.y -= 1;
-                                                }
-
-                                                self.create_history();
+                                            for i in (begin.y..=end.y).rev() {
+                                                self.buffer
+                                                    .insert(end.y + 1, self.buffer[i].clone());
                                             }
-                                        } else {
-                                            self.update_selection(modifiers);
-                                        }
 
-                                        if modifiers == KeyModifiers::CONTROL {
-                                            should_update_viewbox = false;
-
-                                            self.viewbox.y = self.viewbox.y.saturating_sub(1);
-                                        } else if self.cursor.y > 0 {
-                                            self.cursor.y -= 1;
+                                            self.create_history();
                                         } else {
-                                            self.cursor.x = 0;
+                                            if modifiers == KeyModifiers::ALT {
+                                                let (begin, end) = self
+                                                    .get_selection()
+                                                    .unwrap_or((self.cursor, self.cursor));
+                                                if begin.y > 0 {
+                                                    self.update_last_history_state();
+                                                    self.dirty = true;
+
+                                                    for i in begin.y..=end.y {
+                                                        self.buffer.swap(i - 1, i);
+                                                    }
+                                                    if let Some(anchor) = &mut self.anchor {
+                                                        anchor.y -= 1;
+                                                    }
+
+                                                    self.create_history();
+                                                }
+                                            } else {
+                                                self.update_selection(modifiers);
+                                            }
+
+                                            if modifiers.contains(KeyModifiers::CONTROL) {
+                                                should_update_viewbox = false;
+
+                                                self.viewbox.y = self.viewbox.y.saturating_sub(1);
+                                            } else if self.cursor.y > 0 {
+                                                self.cursor.y -= 1;
+                                            } else {
+                                                self.cursor.x = 0;
+                                            }
                                         }
                                     }
                                     KeyCode::Down => {
-                                        if modifiers == KeyModifiers::ALT {
+                                        if modifiers == KeyModifiers::ALT | KeyModifiers::SHIFT {
                                             let (begin, end) = self
                                                 .get_selection()
                                                 .unwrap_or((self.cursor, self.cursor));
-                                            if end.y < self.buffer.len() - 1 {
-                                                self.update_last_history_state();
-                                                self.dirty = true;
+                                            self.update_last_history_state();
+                                            self.dirty = true;
 
-                                                for i in (begin.y..=end.y).rev() {
-                                                    self.buffer.swap(i, i + 1);
-                                                }
-                                                if let Some(anchor) = &mut self.anchor {
-                                                    anchor.y += 1;
-                                                }
-
-                                                self.create_history();
+                                            for i in (begin.y..=end.y).rev() {
+                                                self.buffer
+                                                    .insert(end.y + 1, self.buffer[i].clone());
                                             }
-                                        } else {
-                                            self.update_selection(modifiers);
-                                        }
 
-                                        if modifiers == KeyModifiers::CONTROL {
-                                            should_update_viewbox = false;
+                                            self.cursor.y += end.y - begin.y + 1;
+                                            if let Some(anchor) = &mut self.anchor {
+                                                anchor.y += end.y - begin.y + 1;
+                                            }
 
-                                            self.viewbox.y = (self.viewbox.y + 1).min(
-                                                (self.buffer.len() + EXTRA_GAP)
-                                                    .saturating_sub(self.terminal.height - 2),
-                                            );
-                                        } else if self.cursor.y < self.buffer.len() - 1 {
-                                            self.cursor.y += 1;
+                                            self.create_history();
                                         } else {
-                                            self.cursor.x = self.get_width();
+                                            if modifiers == KeyModifiers::ALT {
+                                                let (begin, end) = self
+                                                    .get_selection()
+                                                    .unwrap_or((self.cursor, self.cursor));
+                                                if end.y < self.buffer.len() - 1 {
+                                                    self.update_last_history_state();
+                                                    self.dirty = true;
+
+                                                    for i in (begin.y..=end.y).rev() {
+                                                        self.buffer.swap(i, i + 1);
+                                                    }
+                                                    if let Some(anchor) = &mut self.anchor {
+                                                        anchor.y += 1;
+                                                    }
+
+                                                    self.create_history();
+                                                }
+                                            } else {
+                                                self.update_selection(modifiers);
+                                            }
+
+                                            if modifiers.contains(KeyModifiers::CONTROL) {
+                                                should_update_viewbox = false;
+
+                                                self.viewbox.y = (self.viewbox.y + 1).min(
+                                                    (self.buffer.len() + EXTRA_GAP)
+                                                        .saturating_sub(self.terminal.height - 2),
+                                                );
+                                            } else if self.cursor.y < self.buffer.len() - 1 {
+                                                self.cursor.y += 1;
+                                            } else {
+                                                self.cursor.x = self.get_width();
+                                            }
                                         }
                                     }
                                     KeyCode::Left => {
                                         self.cursor.x = self.cursor.x.min(self.get_width());
 
+                                        let mut flag = false;
+                                        if let Some((begin, _)) = self.get_selection() {
+                                            self.cursor.x = begin.x;
+                                            flag = true;
+                                        }
                                         self.update_selection(modifiers);
 
-                                        if modifiers == KeyModifiers::CONTROL {
+                                        if modifiers.contains(KeyModifiers::CONTROL) {
                                             // Move to the beginning of the word
                                             if self.cursor.x == 0 && self.cursor.y > 0 {
                                                 self.cursor.y -= 1;
@@ -274,18 +341,24 @@ impl Editor {
                                             {
                                                 self.cursor.x -= 1;
                                             }
-                                        } else if self.cursor.x > 0 {
+                                        } else if !flag && self.cursor.x > 0 {
                                             self.cursor.x -= 1;
-                                        } else if self.cursor.y > 0 {
+                                        } else if !flag && self.cursor.y > 0 {
                                             self.cursor.y -= 1;
                                             self.cursor.x = self.get_width();
                                         }
                                     }
                                     KeyCode::Right => {
                                         self.cursor.x = self.cursor.x.min(self.get_width());
+
+                                        let mut flag = false;
+                                        if let Some((_, end)) = self.get_selection() {
+                                            self.cursor.x = end.x;
+                                            flag = true;
+                                        }
                                         self.update_selection(modifiers);
 
-                                        if modifiers == KeyModifiers::CONTROL {
+                                        if modifiers.contains(KeyModifiers::CONTROL) {
                                             // Move to the end of the word
                                             if self.cursor.x == self.get_width()
                                                 && self.cursor.y < self.buffer.len() - 1
@@ -305,9 +378,9 @@ impl Editor {
                                             {
                                                 self.cursor.x += 1;
                                             }
-                                        } else if self.cursor.x < self.get_width() {
+                                        } else if !flag && self.cursor.x < self.get_width() {
                                             self.cursor.x += 1;
-                                        } else if self.cursor.y < self.buffer.len() - 1 {
+                                        } else if !flag && self.cursor.y < self.buffer.len() - 1 {
                                             self.cursor.y += 1;
                                             self.cursor.x = 0;
                                         }
@@ -426,7 +499,7 @@ impl Editor {
                         MouseEventKind::ScrollUp => {
                             should_update_viewbox = false;
 
-                            let dt = if event.modifiers == KeyModifiers::ALT {
+                            let dt = if event.modifiers.contains(KeyModifiers::ALT) {
                                 3
                             } else {
                                 1
@@ -436,7 +509,7 @@ impl Editor {
                         MouseEventKind::ScrollDown => {
                             should_update_viewbox = false;
 
-                            let dt = if event.modifiers == KeyModifiers::ALT {
+                            let dt = if event.modifiers.contains(KeyModifiers::ALT) {
                                 3
                             } else {
                                 1
@@ -467,6 +540,23 @@ impl Editor {
                             mouse = None;
                         }
 
+                        MouseEventKind::Down(MouseButton::Right) => {
+                            // Fix wrong deletion when selection is empty
+                            if let Some((begin, end)) = self.get_selection() {
+                                if begin == end {
+                                    self.anchor = None;
+                                }
+                            }
+
+                            if let Some((_, end)) = self.get_selection() {
+                                self.trigger_copy()?;
+                                self.cursor = end;
+                                self.anchor = None;
+                            } else {
+                                self.trigger_paste()?;
+                            }
+                        }
+
                         _ => {
                             should_update_viewbox = false;
                         }
@@ -477,6 +567,8 @@ impl Editor {
                     }
                     _ => {}
                 }
+            } else {
+                should_update_viewbox = false;
             }
 
             if let Some(event) = mouse {
@@ -589,7 +681,7 @@ impl Editor {
     }
 
     fn update_selection(&mut self, modifiers: KeyModifiers) {
-        if modifiers == KeyModifiers::SHIFT {
+        if modifiers.contains(KeyModifiers::SHIFT) {
             // if anchor is None, set it to cursor
             self.anchor.get_or_insert(self.cursor);
         } else {
@@ -829,6 +921,85 @@ impl Editor {
     fn update_last_history_state(&mut self) {
         self.history
             .update_state(self.viewbox, self.cursor, self.anchor);
+    }
+
+    fn trigger_copy(&mut self) -> Result<(), Error> {
+        // Fix wrong deletion when selection is empty
+        if let Some((begin, end)) = self.get_selection() {
+            if begin == end {
+                self.anchor = None;
+            }
+        }
+
+        let mut clipboard = String::new();
+        if let Some((begin, end)) = self.get_selection() {
+            for i in begin.y..=end.y {
+                let row = &self.buffer[i];
+                let l = if i == begin.y { begin.x } else { 0 };
+                let r = if i == end.y { end.x } else { row.len() };
+                clipboard.push_str(
+                    &row.0[l..r]
+                        .iter()
+                        .map(|(g, _)| g.as_str())
+                        .collect::<String>(),
+                );
+                if i != end.y {
+                    clipboard.push('\n');
+                }
+            }
+        } else {
+            // Just copy the current line
+            clipboard = self.buffer[self.cursor.y].to_string();
+        }
+
+        terminal_clipboard::set_string(clipboard)?;
+
+        Ok(())
+    }
+
+    fn trigger_paste(&mut self) -> Result<(), Error> {
+        self.update_last_history_state();
+        self.dirty = true;
+
+        let clipboard = terminal_clipboard::get_string()?;
+
+        if clipboard.is_empty() {
+            return Ok(());
+        }
+
+        if let Some((begin, end)) = self.get_selection() {
+            self.delete_selection_range(begin, end);
+        }
+
+        let line_count = clipboard.lines().count();
+        if line_count == 1 {
+            // Paste to the current line
+            let middle: Row = clipboard.lines().next().unwrap_or_default().into();
+            let (left, right) = self.buffer[self.cursor.y].0.split_at(self.cursor.x);
+            self.buffer[self.cursor.y] = Row([left, &middle.0, right].concat());
+            self.cursor.x += middle.len();
+        } else {
+            let lines = clipboard.lines();
+            let current_line = self.buffer[self.cursor.y].0.clone();
+            let (left, right) = current_line.split_at(self.cursor.x);
+            for (i, line) in lines.enumerate() {
+                let line: Row = line.into();
+                if i == 0 {
+                    self.buffer[self.cursor.y] = Row([left, &line.0].concat());
+                } else if i == line_count - 1 {
+                    self.buffer
+                        .insert(self.cursor.y + i, Row([&line.0, right].concat()));
+                    self.cursor.x = line.len();
+                    self.cursor.y += i;
+                } else {
+                    self.buffer.insert(self.cursor.y + i, line);
+                }
+            }
+        }
+
+        self.create_history();
+
+        Ok(())
     }
 
     fn on_exit(&mut self) -> Result<(), Error> {

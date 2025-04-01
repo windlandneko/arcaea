@@ -1,10 +1,13 @@
 use std::fmt;
 
+use terminal_clipboard::ClipboardError;
+
 pub enum Error {
     UnrecognizedOption(String),
     TooManyArguments(usize),
     Io(std::io::Error),
     Fmt(std::fmt::Error),
+    ClipboardError(String),
 }
 
 // Provides detailed and user-friendly error messages for debugging purposes.
@@ -17,6 +20,7 @@ impl fmt::Debug for Error {
             }
             Error::Io(error) => write!(f, "File IO error: {}", error),
             Error::Fmt(error) => write!(f, "Format error: {}", error),
+            Error::ClipboardError(message) => write!(f, "Clipboard error: {}", message),
             // _ => write!(f, "An unknown error occurred."),
         }
     }
@@ -31,5 +35,11 @@ impl From<std::io::Error> for Error {
 impl From<std::fmt::Error> for Error {
     fn from(error: std::fmt::Error) -> Self {
         Self::Fmt(error)
+    }
+}
+
+impl From<ClipboardError> for Error {
+    fn from(error: ClipboardError) -> Self {
+        Self::ClipboardError(error.to_string())
     }
 }
