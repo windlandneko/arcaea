@@ -59,6 +59,8 @@ pub struct Editor {
     anchor: Option<Position>,
 
     dirty: bool,
+
+    history: History,
 }
 
 impl Editor {
@@ -76,11 +78,11 @@ impl Editor {
         if let Some(name) = filename {
             self.buffer = std::fs::read_to_string(name)?
                 .split('\n')
-                .map(|s| Row::from(s.to_string()))
+                .map(|s| Row::from(s))
                 .collect();
         } else {
             self.buffer = Vec::new();
-            self.buffer.push(Row::from(String::new()));
+            self.buffer.push(Row::from(""));
 
             self.dirty = true;
         }
@@ -765,11 +767,7 @@ impl Editor {
 
         std::fs::write(
             self.filename.clone().unwrap(),
-            self.buffer
-                .iter()
-                .map(|row| row.to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
+            self.buffer.iter().map(|line| line.to_string()).collect::<Vec<_>>().join("\n"),
         )?;
         // TODO: Option to save with \r\n
 
