@@ -7,7 +7,7 @@ use crossterm::{
 use std::io::{self, Write};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::{Error, Row, Terminal, Tui};
+use crate::{style, Error, Row, Terminal, Tui};
 
 const EXTRA_GAP: usize = 3;
 
@@ -118,6 +118,14 @@ impl Editor {
                                     }
                                     None => {}
                                 }
+                            }
+
+                            // Select ALL
+                            (KeyModifiers::CONTROL, KeyCode::Char('a' | 'A')) => {
+                                self.anchor = Some(Position { x: 0, y: 0 });
+                                self.cursor.y = self.buffer.len() - 1;
+                                self.cursor.x = self.get_width();
+                                should_update_viewbox = false;
                             }
 
                             // Regular character input
@@ -541,7 +549,7 @@ impl Editor {
         for i in 0..self.terminal.height {
             self.terminal.write(
                 (0, i).into(),
-                " ".repeat(self.terminal.width).on((59, 34, 76).into()),
+                " ".repeat(self.terminal.width).on(style::background),
             );
         }
 
@@ -562,8 +570,8 @@ impl Editor {
                     " ".repeat(self.terminal.width - content_left.width() - content_right.width()),
                     content_right,
                 )
-                .with((219, 191, 239).into())
-                .on((40, 23, 51).into()),
+                .with(style::text_primary)
+                .on(style::background_primary),
             );
         }
 
@@ -572,8 +580,8 @@ impl Editor {
             (0, self.terminal.height - 1).into(),
             self.status_string
                 .clone()
-                .with((90, 89, 119).into())
-                .on((59, 34, 76).into()),
+                .with(style::text_linenum)
+                .on(style::background),
         );
 
         self.render_sidebar(cursor);
@@ -594,18 +602,18 @@ impl Editor {
                     break;
                 }
                 if dx >= (self.sidebar_width + w) as isize {
-                    let fg_color = (255, 255, 255);
-                    let mut bg_color = (59, 34, 76);
+                    let fg_color = style::text;
+                    let mut bg_color = style::background;
 
                     if let Some((begin, end)) = self.get_selection() {
                         let current = (i, line_number).into();
                         if begin <= current && current < end {
-                            bg_color = (164, 160, 232);
+                            bg_color = style::background_selected;
                         }
                     }
                     self.terminal.write_char(
                         (dx as usize - w, line_number - self.viewbox.y).into(),
-                        g.as_str().with(fg_color.into()).on(bg_color.into()),
+                        g.as_str().with(fg_color).on(bg_color),
                     );
                 }
             }
@@ -679,17 +687,17 @@ impl Editor {
                     width = self.sidebar_width - 1
                 );
                 let num = if i + self.viewbox.y == cursor.y {
-                    lineno.with((219, 191, 239).into())
+                    lineno.with(style::text_linenum_selected)
                 } else {
-                    lineno.with((90, 89, 119).into())
+                    lineno.with(style::text_linenum)
                 };
                 self.terminal
-                    .write((0, i).into(), num.on((59, 34, 76).into()));
+                    .write((0, i).into(), num.on(style::background));
             } else {
                 self.terminal.write(
                     (0, i).into(),
                     format!("{:>width$} ", "~", width = self.sidebar_width - 1)
-                        .with((90, 89, 119).into()),
+                        .with(style::text_linenum),
                 );
             }
         }
