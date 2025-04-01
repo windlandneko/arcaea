@@ -16,6 +16,7 @@ impl Row {
         self.0.is_empty()
     }
 
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.0.iter().map(|(g, _)| g.as_str()).collect::<String>()
     }

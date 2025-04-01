@@ -79,7 +79,7 @@ where
     /// If the current version isn't the newest, it will truncate the history to the current version.
     pub fn push_state(
         &mut self,
-        item: &Vec<T>,
+        item: &[T],
         viewbox: Position,
         cursor: Position,
         anchor: Option<Position>,
@@ -108,12 +108,13 @@ where
         //       v-1   v   <- index
 
         if v == 0 {
-            self.current = item.clone();
+            self.current = item.to_owned();
         } else {
             self.buffer[v - 1].new.resize(new_len, None);
             self.buffer[v].old.resize(old_len, None);
 
             let min_len = old_len.min(new_len);
+            #[allow(clippy::needless_range_loop)]
             for i in 0..min_len {
                 let old_row = &mut self.current[i];
                 let new_row = &item[i];
@@ -123,11 +124,13 @@ where
                     *old_row = new_row.clone();
                 }
             }
+            #[allow(clippy::needless_range_loop)]
             for i in min_len..old_len {
                 self.buffer[v].old[i] = Some(self.current[i].clone());
             }
 
             self.current.resize(new_len, T::default());
+            #[allow(clippy::needless_range_loop)]
             for i in min_len..new_len {
                 self.buffer[v - 1].new[i] = Some(item[i].clone());
                 self.current[i] = item[i].clone();
