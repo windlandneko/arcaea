@@ -513,9 +513,9 @@ impl Editor {
                             should_update_viewbox = false;
 
                             let dt = if event.modifiers.contains(KeyModifiers::ALT) {
-                                3
+                                5
                             } else {
-                                1
+                                2
                             };
                             self.viewbox.y = self.viewbox.y.saturating_sub(dt);
                         }
@@ -523,9 +523,9 @@ impl Editor {
                             should_update_viewbox = false;
 
                             let dt = if event.modifiers.contains(KeyModifiers::ALT) {
-                                3
+                                5
                             } else {
-                                1
+                                2
                             };
                             self.viewbox.y = (self.viewbox.y + dt).min(
                                 (self.buffer.len() + EXTRA_GAP)
@@ -745,10 +745,9 @@ impl Editor {
                     "{}{}{}",
                     content_left,
                     " ".repeat(
-                        self.terminal.width
-                            - content_left.width()
-                            - content_right.width()
-                            - LOGO_WIDTH
+                        self.terminal.width.saturating_sub(
+                            content_left.width() + content_right.width() + LOGO_WIDTH
+                        )
                     ),
                     content_right,
                 )

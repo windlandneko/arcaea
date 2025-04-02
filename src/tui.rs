@@ -74,9 +74,9 @@ impl Input {
 pub struct Tui {}
 
 impl Tui {
-    pub fn confirm_exit(changed: bool) -> Result<Option<bool>, Error> {
-        if !changed {
-            return Ok(Some(true));
+    pub fn confirm_exit(dirty: bool) -> Result<Option<bool>, Error> {
+        if !dirty {
+            return Ok(Some(false));
         }
 
         println!("[退出程序] 是否保存? (Y/n)");
