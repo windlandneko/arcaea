@@ -10,11 +10,13 @@ use std::{
     io::{self, Write},
     path::Path,
 };
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     style,
     syntax::{TokenState, TokenType},
+    tui::Input,
     Error, History, Row, Syntax, Terminal, Tui,
 };
 
@@ -72,6 +74,10 @@ pub struct Editor {
 
     history: History<Row>,
     syntax: Syntax,
+
+    search: Input,
+    search_result: Vec<Position>,
+    is_searching: bool,
 }
 
 impl Editor {
@@ -104,6 +110,8 @@ impl Editor {
             if let Some(s) = ext.and_then(|e| Syntax::get(e).transpose()) {
                 self.syntax = s?;
                 self.update_syntax();
+            } else {
+                self.syntax = Syntax::default();
             }
         } else {
             self.buffer = Vec::new();
@@ -215,6 +223,11 @@ impl Editor {
                             // Paste
                             (KeyModifiers::CONTROL, KeyCode::Char('v' | 'V')) => {
                                 self.trigger_paste()?
+                            }
+
+                            // Search
+                            (KeyModifiers::CONTROL, KeyCode::Char('f' | 'F')) => {
+                                // self.into_search_mode()?;
                             }
 
                             // Regular character input
@@ -811,10 +824,11 @@ impl Editor {
                 content_left
             };
             let content_right = format!(
-                "{}  行 {}，列 {} ",
-                self.syntax.name,
+                "行 {}，列 {}  {} {} ",
                 self.cursor.y + 1,
-                self.cursor.x + 1
+                self.cursor.x + 1,
+                if self.is_crlf { "CRLF " } else { "LF " },
+                self.syntax.name,
             );
             self.terminal.write(
                 (LOGO_WIDTH, self.terminal.height.saturating_sub(2)).into(),
@@ -842,6 +856,10 @@ impl Editor {
                 .on(style::background),
         );
 
+        if self.is_searching {
+            self.render_search();
+        }
+
         self.render_sidebar();
 
         let begin = self.viewbox.y;
@@ -849,11 +867,10 @@ impl Editor {
 
         for line_number in begin..end {
             let mut dx = self.sidebar_width as isize - self.viewbox.x as isize;
-            for (i, ((g, w), token)) in self.buffer[line_number]
+            for (i, (g, w)) in self.buffer[line_number]
                 .rope
                 .iter()
-                .zip(&self.buffer[line_number].syntax)
-                .chain([(&("\n".to_string(), 1), &TokenType::Normal)]) // Append a virtual space to the end of the line
+                .chain([(&("\n".to_string(), 1))]) // Append a virtual space to the end of the line
                 .enumerate()
             {
                 dx += *w as isize;
@@ -862,17 +879,21 @@ impl Editor {
                 }
                 if dx >= (self.sidebar_width + w) as isize {
                     let mut str = g.as_str();
-                    let fg_color = match token {
-                        TokenType::Normal => style::token_normal,
-                        TokenType::Number => style::token_number,
-                        TokenType::Match => style::token_match,
-                        TokenType::String => style::token_string,
-                        TokenType::MlString => style::token_ml_string,
-                        TokenType::Comment => style::token_comment,
-                        TokenType::MlComment => style::token_ml_comment,
-                        TokenType::Keyword1 => style::token_keyword1,
-                        TokenType::Keyword2 => style::token_keyword2,
-                        TokenType::Keyword3 => style::token_keyword3,
+                    let fg_color = if let Some(token) = self.buffer[line_number].syntax.get(i) {
+                        match token {
+                            TokenType::Normal => style::token_normal,
+                            TokenType::Number => style::token_number,
+                            TokenType::Match => style::token_match,
+                            TokenType::String => style::token_string,
+                            TokenType::MlString => style::token_ml_string,
+                            TokenType::Comment => style::token_comment,
+                            TokenType::MlComment => style::token_ml_comment,
+                            TokenType::Keyword1 => style::token_keyword1,
+                            TokenType::Keyword2 => style::token_keyword2,
+                            TokenType::Keyword3 => style::token_keyword3,
+                        }
+                    } else {
+                        style::token_normal
                     };
                     let mut bg_color = style::background;
 
@@ -880,10 +901,6 @@ impl Editor {
                         let current = (i, line_number).into();
                         if begin <= current && current < end {
                             bg_color = style::background_selected;
-                            // if str == " " {
-                            //     str = "•";
-                            //     g_color = style::text_selected_whitespace;
-                            // }
                         }
                     }
                     if str == "\n" {
@@ -1161,5 +1178,73 @@ impl Editor {
         } else {
             Ok(false)
         }
+    }
+
+    fn into_search_mode(&mut self) -> Result<(), Error> {
+        self.is_searching = true;
+
+        self.search = Input::new();
+        self.search.viewbox = (0, self.terminal.height).into();
+        self.search.max_width = self.terminal.width.saturating_sub(18);
+
+        let anchor = self.cursor;
+
+        if self.check_minimum_window_size() {
+            self.render_to_buffer();
+        }
+
+        let mut last_input = String::new();
+        loop {
+            if event::poll(std::time::Duration::from_millis(25))? {
+                let event = event::read()?;
+                // match self.search.handle_event(&event)? {
+                //     Some(true) => {}
+                //     Some(false) => {
+                //         self.is_searching = false;
+                //         return Ok(());
+                //     }
+                //     None => {
+                //         if let Event::Mouse(event) = event {
+                //             match event.kind {
+                //                 MouseEventKind::Down(MouseButton::Left) => {
+                //                     self.cursor = event.into();
+                //                     self.anchor = Some(self.cursor);
+                //                 }
+                //                 MouseEventKind::Drag(MouseButton::Left) => {
+                //                     self.cursor = event.into();
+                //                     self.anchor = Some(self.cursor);
+                //                 }
+                //                 _ => {}
+                //             }
+                //         }
+                //     }
+                // }
+            }
+
+            let input = self.search.buffer.to_string();
+            if input != last_input {
+                self.search_result.clear();
+                for line in self.buffer.iter().map(|line| line.to_string()) {
+                    let mut i = 0;
+                    while let Some(pos) = line[i..].find(&input) {
+                        self.search_result
+                            .push((line[..i].graphemes(true).count(), self.cursor.y).into());
+                        i = pos + input.len();
+                    }
+                }
+            }
+
+            if !self.check_minimum_window_size() {
+                continue;
+            }
+
+            self.render_to_buffer();
+
+            last_input = input;
+        }
+    }
+
+    fn render_search(&mut self) {
+        self.search.render(&mut self.terminal);
     }
 }

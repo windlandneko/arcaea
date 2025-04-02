@@ -114,7 +114,7 @@ impl Syntax {
                     };
                 }
             }
-            Err(e) => return Err(e.into()),
+            Err(_) => return Ok(None),
         }
 
         Ok(None)

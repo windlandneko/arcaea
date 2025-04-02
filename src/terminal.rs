@@ -111,8 +111,9 @@ impl Terminal {
         let mut current_style = ContentStyle::default();
         queue!(
             self.stdout,
+            cursor::Hide,
             style::ResetColor,
-            style::SetAttribute(style::Attribute::Reset)
+            style::SetAttribute(style::Attribute::Reset),
         )?;
 
         for (y, row) in self.buffer.iter().enumerate() {
@@ -126,7 +127,7 @@ impl Terminal {
 
                 #[cfg(not(feature = "debug"))]
                 {
-                    if pixel != last_pixel {
+                    if pixel != last_pixel||true {
                         if x != cursor_x {
                             queue!(self.stdout, cursor::MoveTo(x as u16, y as u16))?;
                             cursor_x = x;
@@ -170,8 +171,6 @@ impl Terminal {
 
         if let Some(Position { x, y }) = self.cursor {
             queue!(self.stdout, cursor::Show, cursor::MoveTo(x as u16, y as u16))?;
-        } else {
-            queue!(self.stdout, cursor::Hide)?;
         }
 
         execute!(self.stdout, terminal::EndSynchronizedUpdate)?;

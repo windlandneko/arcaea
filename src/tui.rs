@@ -140,7 +140,7 @@ impl Input {
         Ok(None)
     }
 
-    pub fn render(&self, term: &mut Terminal) -> Result<(), Error> {
+    pub fn render(&self, term: &mut Terminal) {
         term.write(
             self.viewbox,
             " ".repeat(self.max_width)
@@ -174,8 +174,6 @@ impl Input {
             )
                 .into(),
         );
-
-        Ok(())
     }
 }
 
@@ -523,7 +521,7 @@ impl Prompt {
 
         self.input.viewbox = (x + 3, y + 4).into();
         self.input.max_width = w - 4;
-        self.input.render(term)?;
+        self.input.render(term);
 
         let buttons_offset = self.yes.width + self.no.width + 10;
         let mut offset = (x + w - buttons_offset, y + h - 2);
