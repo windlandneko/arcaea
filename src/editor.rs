@@ -315,6 +315,13 @@ impl Editor {
                                     KeyCode::Left => {
                                         self.cursor.x = self.cursor.x.min(self.get_width());
 
+                                        // Fix wrong deletion when selection is empty
+                                        if let Some((begin, end)) = self.get_selection() {
+                                            if begin == end {
+                                                self.anchor = None;
+                                            }
+                                        }
+
                                         let mut flag = false;
                                         if let Some((begin, _)) = self.get_selection() {
                                             self.cursor.x = begin.x;
@@ -349,6 +356,13 @@ impl Editor {
                                     }
                                     KeyCode::Right => {
                                         self.cursor.x = self.cursor.x.min(self.get_width());
+
+                                        // Fix wrong deletion when selection is empty
+                                        if let Some((begin, end)) = self.get_selection() {
+                                            if begin == end {
+                                                self.anchor = None;
+                                            }
+                                        }
 
                                         let mut flag = false;
                                         if let Some((_, end)) = self.get_selection() {
@@ -572,7 +586,7 @@ impl Editor {
             }
 
             if let Some(event) = mouse {
-                if (event.row as usize) < self.terminal.height - 2 {
+                if (event.row as usize) < self.terminal.height - 2 || dragging_sidebar {
                     self.cursor.y = event.row as usize + self.viewbox.y;
                     let x =
                         (event.column as usize + self.viewbox.x).saturating_sub(self.sidebar_width);
@@ -889,7 +903,9 @@ impl Editor {
 
         if x >= 0 && x < self.terminal.width as isize && y >= 0 && y < self.terminal.height as isize
         {
-            queue!(stdout, cursor::MoveTo(x as u16, y as u16))?;
+            queue!(stdout, cursor::MoveTo(x as u16, y as u16), cursor::Show)?;
+        } else {
+            queue!(stdout, cursor::Hide)?;
         }
 
         Ok(())

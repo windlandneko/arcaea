@@ -90,7 +90,7 @@ impl Terminal {
     }
 
     pub fn begin_render(&mut self) -> Result<(), Error> {
-        execute!(self.stdout, terminal::BeginSynchronizedUpdate, cursor::Hide)?;
+        execute!(self.stdout, terminal::BeginSynchronizedUpdate)?;
 
         for row in &mut self.buffer {
             for pixel in row {
@@ -158,7 +158,6 @@ impl Terminal {
         execute!(
             self.stdout,
             cursor::RestorePosition,
-            cursor::Show,
             terminal::EndSynchronizedUpdate
         )?;
 
