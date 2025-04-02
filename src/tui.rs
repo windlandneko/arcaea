@@ -34,7 +34,9 @@ impl Input {
                 match event::read()? {
                     Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
                         KeyCode::Char(c) => {
-                            self.input.0.push((c.to_string(), c.width().unwrap_or(0)));
+                            self.input
+                                .rope
+                                .push((c.to_string(), c.width().unwrap_or(0)));
                         }
                         KeyCode::Esc => {
                             return Ok(());
@@ -44,7 +46,7 @@ impl Input {
                         }
 
                         KeyCode::Backspace => {
-                            self.input.0.pop();
+                            self.input.rope.pop();
                         }
                         _ => {}
                     },
@@ -224,19 +226,16 @@ impl Confirm {
                             cancel_button.intersect(offset, mouse);
                         }
 
-                        match event.kind {
-                            MouseEventKind::Down(_) => {
-                                if self.yes.hover {
-                                    return Ok(Some(true));
-                                } else if self.no.hover {
-                                    return Ok(Some(false));
-                                } else if let Some(ref cancel_button) = self.cancel {
-                                    if cancel_button.hover {
-                                        return Ok(None);
-                                    }
+                        if let MouseEventKind::Down(_) = event.kind {
+                            if self.yes.hover {
+                                return Ok(Some(true));
+                            } else if self.no.hover {
+                                return Ok(Some(false));
+                            } else if let Some(ref cancel_button) = self.cancel {
+                                if cancel_button.hover {
+                                    return Ok(None);
                                 }
                             }
-                            _ => {}
                         }
                     }
 
@@ -314,7 +313,10 @@ impl Tui {
         }
 
         Confirm::new(
-            "是否要保存对文件的更改？".to_string(),
+            format!(
+                "是否要保存对 {} 的更改？",
+                editor.filename.clone().unwrap_or("Untitled".to_string())
+            ),
             "保存".to_string(),
             "不保存".to_string(),
             Some("取消".to_string()),
@@ -345,7 +347,7 @@ impl Tui {
                     },
 
                     Event::Mouse(_) => {
-                        todo!("Mouse event handling");
+                        // todo!("Mouse event handling");
                     }
 
                     _ => {}

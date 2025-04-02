@@ -6,10 +6,17 @@ use crossterm::{
     queue,
     style::Stylize,
 };
-use std::io::{self, Write};
+use std::{
+    io::{self, Write},
+    path::Path,
+};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::{style, Error, History, Row, Terminal, Tui};
+use crate::{
+    style,
+    syntax::{TokenState, TokenType},
+    Error, History, Row, Syntax, Terminal, Tui,
+};
 
 const EXTRA_GAP: usize = 2;
 
@@ -45,7 +52,7 @@ impl<T: Into<usize>> From<(T, T)> for Position {
 
 #[derive(Default)]
 pub struct Editor {
-    filename: Option<String>,
+    pub filename: Option<String>,
 
     buffer: Vec<Row>,
     status_string: String,
@@ -63,6 +70,7 @@ pub struct Editor {
     pub dirty: bool,
 
     history: History<Row>,
+    syntax: Syntax,
 }
 
 impl Editor {
@@ -79,9 +87,18 @@ impl Editor {
 
         if let Some(name) = filename {
             self.buffer = std::fs::read_to_string(name)?
-                .lines()
+                .split('\n')
+                .map(|line| line.strip_suffix('\r').unwrap_or(line))
                 .map(Row::from)
                 .collect();
+
+            let ext = Path::new(&name)
+                .extension()
+                .and_then(std::ffi::OsStr::to_str);
+            if let Some(s) = ext.and_then(|e| Syntax::get(e).transpose()) {
+                self.syntax = s?;
+                self.update_syntax();
+            }
         } else {
             self.buffer = Vec::new();
             self.buffer.push(Row::from(""));
@@ -202,10 +219,28 @@ impl Editor {
                                     self.delete_selection_range(begin, end);
                                 }
 
-                                self.buffer[self.cursor.y].0.insert(
+                                self.buffer[self.cursor.y].rope.insert(
                                     self.cursor.x,
                                     (char.to_string(), char.width().unwrap_or(0)),
                                 );
+                                self.cursor.x += 1;
+
+                                self.create_history();
+                            }
+
+                            (_, KeyCode::Tab) => {
+                                self.update_last_history_state();
+                                self.dirty = true;
+
+                                self.cursor.x = self.cursor.x.min(self.get_width());
+
+                                if let Some((begin, end)) = self.get_selection() {
+                                    self.delete_selection_range(begin, end);
+                                }
+
+                                self.buffer[self.cursor.y]
+                                    .rope
+                                    .insert(self.cursor.x, ("    ".to_string(), 4));
                                 self.cursor.x += 1;
 
                                 self.create_history();
@@ -342,13 +377,17 @@ impl Editor {
                                                 self.cursor.x = self.get_width();
                                             }
                                             while self.cursor.x > 0
-                                                && self.buffer[self.cursor.y].0[self.cursor.x - 1].0
+                                                && self.buffer[self.cursor.y].rope
+                                                    [self.cursor.x - 1]
+                                                    .0
                                                     == " "
                                             {
                                                 self.cursor.x -= 1;
                                             }
                                             while self.cursor.x > 0
-                                                && self.buffer[self.cursor.y].0[self.cursor.x - 1].0
+                                                && self.buffer[self.cursor.y].rope
+                                                    [self.cursor.x - 1]
+                                                    .0
                                                     != " "
                                             {
                                                 self.cursor.x -= 1;
@@ -385,14 +424,16 @@ impl Editor {
                                                 self.cursor.y += 1;
                                                 self.cursor.x = 0;
                                             }
-                                            while self.cursor.x < self.buffer[self.cursor.y].0.len()
-                                                && self.buffer[self.cursor.y].0[self.cursor.x].0
+                                            while self.cursor.x
+                                                < self.buffer[self.cursor.y].rope.len()
+                                                && self.buffer[self.cursor.y].rope[self.cursor.x].0
                                                     == " "
                                             {
                                                 self.cursor.x += 1;
                                             }
-                                            while self.cursor.x < self.buffer[self.cursor.y].0.len()
-                                                && self.buffer[self.cursor.y].0[self.cursor.x].0
+                                            while self.cursor.x
+                                                < self.buffer[self.cursor.y].rope.len()
+                                                && self.buffer[self.cursor.y].rope[self.cursor.x].0
                                                     != " "
                                             {
                                                 self.cursor.x += 1;
@@ -434,13 +475,15 @@ impl Editor {
                                             self.delete_selection_range(begin, end);
                                         }
 
-                                        let new_line = Row(self.buffer[self.cursor.y].0
-                                            [self.cursor.x..]
-                                            .to_vec());
+                                        let new_line = Row::from(
+                                            self.buffer[self.cursor.y].rope[self.cursor.x..]
+                                                .to_vec(),
+                                        );
                                         self.buffer.insert(self.cursor.y + 1, new_line);
-                                        self.buffer[self.cursor.y] =
-                                            Row(self.buffer[self.cursor.y].0[..self.cursor.x]
-                                                .to_vec());
+                                        self.buffer[self.cursor.y] = Row::from(
+                                            self.buffer[self.cursor.y].rope[..self.cursor.x]
+                                                .to_vec(),
+                                        );
                                         self.cursor.y += 1;
                                         self.cursor.x = 0;
 
@@ -465,15 +508,15 @@ impl Editor {
                                         } else if self.cursor.x > 0 {
                                             // The cursor is in the middle, just delete the char
                                             self.cursor.x -= 1;
-                                            self.buffer[self.cursor.y].0.remove(self.cursor.x);
+                                            self.buffer[self.cursor.y].rope.remove(self.cursor.x);
                                         } else if self.cursor.y > 0 {
                                             // The cursor is in the beginning, and not at the first line
                                             // Merge the current line with the previous line
                                             self.cursor.y -= 1;
                                             self.cursor.x = self.get_width();
-                                            let mut row = self.buffer[self.cursor.y].0.clone();
-                                            row.extend(self.buffer.remove(self.cursor.y + 1).0);
-                                            self.buffer[self.cursor.y] = Row(row);
+                                            let mut row = self.buffer[self.cursor.y].rope.clone();
+                                            row.extend(self.buffer.remove(self.cursor.y + 1).rope);
+                                            self.buffer[self.cursor.y] = Row::from(row);
                                         }
 
                                         self.create_history();
@@ -495,13 +538,13 @@ impl Editor {
                                             self.delete_selection_range(begin, end);
                                         } else if self.cursor.x < self.get_width() {
                                             // The cursor is in the middle, just delete the char
-                                            self.buffer[self.cursor.y].0.remove(self.cursor.x);
+                                            self.buffer[self.cursor.y].rope.remove(self.cursor.x);
                                         } else if self.cursor.y < self.buffer.len() - 1 {
                                             // The cursor is in the end, and not at the last line
                                             // Merge the current line with the next line
-                                            let mut row = self.buffer[self.cursor.y].0.clone();
-                                            row.extend(self.buffer.remove(self.cursor.y + 1).0);
-                                            self.buffer[self.cursor.y] = Row(row);
+                                            let mut row = self.buffer[self.cursor.y].rope.clone();
+                                            row.extend(self.buffer.remove(self.cursor.y + 1).rope);
+                                            self.buffer[self.cursor.y] = Row::from(row);
                                         }
 
                                         self.create_history();
@@ -625,7 +668,7 @@ impl Editor {
                             self.cursor.x = self.get_width();
                         } else {
                             let visual_width = self.buffer[self.cursor.y]
-                                .0
+                                .rope
                                 .iter()
                                 .map(|g| g.1)
                                 .sum::<usize>();
@@ -633,7 +676,8 @@ impl Editor {
                                 self.cursor.x = self.get_width();
                             } else {
                                 let mut width = 0;
-                                for (i, cell) in self.buffer[self.cursor.y].0.iter().enumerate() {
+                                for (i, cell) in self.buffer[self.cursor.y].rope.iter().enumerate()
+                                {
                                     if width >= x {
                                         self.cursor.x = i;
                                         break;
@@ -682,13 +726,15 @@ impl Editor {
 
     fn delete_selection_range(&mut self, begin: Position, end: Position) {
         // Range delete
-        self.buffer[begin.y] = Row(self.buffer[begin.y]
-            .0
-            .iter()
-            .take(begin.x)
-            .chain(self.buffer[end.y].0.iter().skip(end.x))
-            .cloned()
-            .collect());
+        self.buffer[begin.y] = Row::from(
+            self.buffer[begin.y]
+                .rope
+                .iter()
+                .take(begin.x)
+                .chain(self.buffer[end.y].rope.iter().skip(end.x))
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         for index in (begin.y + 1..=end.y).rev() {
             self.buffer.remove(index);
         }
@@ -755,7 +801,12 @@ impl Editor {
             } else {
                 content_left
             };
-            let content_right = format!("行 {}，列 {} ", self.cursor.y + 1, self.cursor.x + 1);
+            let content_right = format!(
+                "{}  行 {}，列 {} ",
+                self.syntax.name,
+                self.cursor.y + 1,
+                self.cursor.x + 1
+            );
             self.terminal.write(
                 (LOGO_WIDTH, self.terminal.height.saturating_sub(2)).into(),
                 format!(
@@ -789,10 +840,11 @@ impl Editor {
 
         for line_number in begin..end {
             let mut dx = self.sidebar_width as isize - self.viewbox.x as isize;
-            for (i, (g, w)) in self.buffer[line_number]
-                .0
+            for (i, ((g, w), token)) in self.buffer[line_number]
+                .rope
                 .iter()
-                .chain([&("\n".to_string(), 1)]) // Append a virtual space to the end of the line
+                .zip(&self.buffer[line_number].syntax)
+                .chain([(&("\n".to_string(), 1), &TokenType::Normal)]) // Append a virtual space to the end of the line
                 .enumerate()
             {
                 dx += *w as isize;
@@ -801,7 +853,18 @@ impl Editor {
                 }
                 if dx >= (self.sidebar_width + w) as isize {
                     let mut str = g.as_str();
-                    let fg_color = style::text;
+                    let fg_color = match token {
+                        TokenType::Normal => style::token_normal,
+                        TokenType::Number => style::token_number,
+                        TokenType::Match => style::token_match,
+                        TokenType::String => style::token_string,
+                        TokenType::MlString => style::token_ml_string,
+                        TokenType::Comment => style::token_comment,
+                        TokenType::MlComment => style::token_ml_comment,
+                        TokenType::Keyword1 => style::token_keyword1,
+                        TokenType::Keyword2 => style::token_keyword2,
+                        TokenType::Keyword3 => style::token_keyword3,
+                    };
                     let mut bg_color = style::background;
 
                     if let Some((begin, end)) = self.get_selection() {
@@ -926,7 +989,7 @@ impl Editor {
     fn get_cursor_position(&self) -> Position {
         Position {
             x: self.buffer[self.cursor.y]
-                .0
+                .rope
                 .iter()
                 .take(self.cursor.x)
                 .map(|g| g.1)
@@ -962,6 +1025,8 @@ impl Editor {
     }
 
     fn create_history(&mut self) {
+        self.update_syntax();
+
         self.history
             .push_state(&self.buffer, self.viewbox, self.cursor, self.anchor);
     }
@@ -985,7 +1050,7 @@ impl Editor {
                 let l = if i == begin.y { begin.x } else { 0 };
                 let r = if i == end.y { end.x } else { row.len() };
                 clipboard.push_str(
-                    &row.0[l..r]
+                    &row.rope[l..r.max(row.len())]
                         .iter()
                         .map(|(g, _)| g.as_str())
                         .collect::<String>(),
@@ -1017,25 +1082,27 @@ impl Editor {
         if let Some((begin, end)) = self.get_selection() {
             self.delete_selection_range(begin, end);
         }
-
-        let line_count = clipboard.lines().count();
+        let lines = clipboard
+            .split('\n')
+            .map(|line| line.strip_suffix('\r').unwrap_or(line))
+            .collect::<Vec<&str>>();
+        let line_count = lines.len();
         if line_count == 1 {
             // Paste to the current line
-            let middle: Row = clipboard.lines().next().unwrap_or_default().into();
-            let (left, right) = self.buffer[self.cursor.y].0.split_at(self.cursor.x);
-            self.buffer[self.cursor.y] = Row([left, &middle.0, right].concat());
+            let middle: Row = lines[0].into();
+            let (left, right) = self.buffer[self.cursor.y].rope.split_at(self.cursor.x);
+            self.buffer[self.cursor.y] = Row::from([left, &middle.rope, right].concat());
             self.cursor.x += middle.len();
         } else {
-            let lines = clipboard.lines();
-            let current_line = self.buffer[self.cursor.y].0.clone();
+            let current_line = self.buffer[self.cursor.y].rope.clone();
             let (left, right) = current_line.split_at(self.cursor.x);
-            for (i, line) in lines.enumerate() {
+            for (i, &line) in lines.iter().enumerate() {
                 let line: Row = line.into();
                 if i == 0 {
-                    self.buffer[self.cursor.y] = Row([left, &line.0].concat());
+                    self.buffer[self.cursor.y] = Row::from([left, &line.rope].concat());
                 } else if i == line_count - 1 {
                     self.buffer
-                        .insert(self.cursor.y + i, Row([&line.0, right].concat()));
+                        .insert(self.cursor.y + i, Row::from([&line.rope, right].concat()));
                     self.cursor.x = line.len();
                     self.cursor.y += i;
                 } else {
@@ -1047,6 +1114,13 @@ impl Editor {
         self.create_history();
 
         Ok(())
+    }
+
+    fn update_syntax(&mut self) {
+        let mut state = TokenState::default();
+        for line in self.buffer.iter_mut() {
+            line.update_syntax(&self.syntax, &mut state);
+        }
     }
 
     fn on_exit(&mut self) -> Result<(), Error> {

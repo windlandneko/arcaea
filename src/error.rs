@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, path::PathBuf};
 
 use terminal_clipboard::ClipboardError;
 
@@ -8,6 +8,7 @@ pub enum Error {
     Io(std::io::Error),
     Fmt(std::fmt::Error),
     ClipboardError(String),
+    FileError(PathBuf, usize, String),
 }
 
 // Provides detailed and user-friendly error messages for debugging purposes.
@@ -21,6 +22,13 @@ impl fmt::Debug for Error {
             Error::Io(error) => write!(f, "File IO error: {}", error),
             Error::Fmt(error) => write!(f, "Format error: {}", error),
             Error::ClipboardError(message) => write!(f, "Clipboard error: {}", message),
+            Error::FileError(path, line, message) => write!(
+                f,
+                "File error: {} (line {}): {}",
+                path.display(),
+                line,
+                message
+            ),
             // _ => write!(f, "An unknown error occurred."),
         }
     }
