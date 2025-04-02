@@ -34,11 +34,11 @@ impl Ord for Position {
     }
 }
 
-impl From<(usize, usize)> for Position {
-    fn from(value: (usize, usize)) -> Self {
+impl<T: Into<usize>> From<(T, T)> for Position {
+    fn from(value: (T, T)) -> Self {
         Position {
-            x: value.0,
-            y: value.1,
+            x: value.0.into(),
+            y: value.1.into(),
         }
     }
 }
@@ -49,7 +49,7 @@ pub struct Editor {
 
     buffer: Vec<Row>,
     status_string: String,
-    terminal: Terminal,
+    pub terminal: Terminal,
 
     sidebar_width: usize,
 
@@ -60,7 +60,7 @@ pub struct Editor {
     /// None if not selected, Some if selected a range.
     anchor: Option<Position>,
 
-    dirty: bool,
+    pub dirty: bool,
 
     history: History<Row>,
 }
@@ -118,7 +118,7 @@ impl Editor {
 
                             (_, KeyCode::Esc)
                             | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
-                                match Tui::confirm_exit(self.dirty)? {
+                                match Tui::confirm_exit(self)? {
                                     Some(true) => {
                                         self.save_file()?;
                                         break;
@@ -145,6 +145,9 @@ impl Editor {
                                     self.viewbox = self.history.current_state.viewbox;
                                     self.cursor = self.history.current_state.cursor;
                                     self.anchor = self.history.current_state.anchor;
+
+                                    // TODO: set dirty flag by really checking if the buffer is changed
+                                    self.dirty = true;
                                 }
                             }
 
@@ -155,6 +158,9 @@ impl Editor {
                                     self.viewbox = self.history.current_state.viewbox;
                                     self.cursor = self.history.current_state.cursor;
                                     self.anchor = self.history.current_state.anchor;
+
+                                    // TODO: set dirty flag by really checking if the buffer is changed
+                                    self.dirty = true;
                                 }
                             }
 
@@ -582,7 +588,10 @@ impl Editor {
                     _ => {}
                 }
             } else if mouse.is_none() {
-                should_update_viewbox = false;
+                continue;
+            } else {
+                #[cfg(feature = "debug")]
+                continue;
             }
 
             if let Some(event) = mouse {
@@ -709,11 +718,19 @@ impl Editor {
     }
 
     fn render(&mut self) -> Result<(), Error> {
+        self.terminal.clear_buffer();
         self.terminal.begin_render()?;
 
-        self.update_sidebar_width();
+        self.render_to_buffer();
+        self.render_cursor()?;
 
-        let cursor = self.get_cursor_position();
+        self.terminal.end_render()?;
+
+        Ok(())
+    }
+
+    pub fn render_to_buffer(&mut self) {
+        self.update_sidebar_width();
 
         for i in 0..self.terminal.height {
             self.terminal.write(
@@ -761,11 +778,11 @@ impl Editor {
             (0, self.terminal.height - 1).into(),
             self.status_string
                 .clone()
-                .with(style::text_sidebar)
+                .with(style::text_dimmed)
                 .on(style::background),
         );
 
-        self.render_sidebar(cursor);
+        self.render_sidebar();
 
         let begin = self.viewbox.y;
         let end = (self.viewbox.y + self.terminal.height - 2).min(self.buffer.len());
@@ -807,15 +824,9 @@ impl Editor {
                 }
             }
         }
-
-        self.render_cursor(cursor)?;
-
-        self.terminal.end_render()?;
-
-        Ok(())
     }
 
-    fn check_minimum_window_size(&mut self) -> bool {
+    pub fn check_minimum_window_size(&mut self) -> bool {
         const MIN_WIDTH: usize = 40;
         const MIN_HEIGHT: usize = 9;
         if self.terminal.width < MIN_WIDTH || self.terminal.height < MIN_HEIGHT {
@@ -867,7 +878,8 @@ impl Editor {
         }
     }
 
-    fn render_sidebar(&mut self, cursor: Position) {
+    fn render_sidebar(&mut self) {
+        let cursor = self.get_cursor_position();
         for i in 0..(self.terminal.height.saturating_sub(2)) {
             if self.viewbox.y + i < self.buffer.len() {
                 let lineno = format!(
@@ -878,7 +890,7 @@ impl Editor {
                 let num = if i + self.viewbox.y == cursor.y {
                     lineno.with(style::text_sidebar_selected)
                 } else {
-                    lineno.with(style::text_sidebar)
+                    lineno.with(style::text_dimmed)
                 };
                 self.terminal
                     .write((0, i).into(), num.on(style::background_sidebar));
@@ -886,14 +898,15 @@ impl Editor {
                 self.terminal.write(
                     (0, i).into(),
                     format!("{:>width$} ", "~", width = self.sidebar_width - 1)
-                        .with(style::text_sidebar)
+                        .with(style::text_dimmed)
                         .on(style::background_sidebar),
                 );
             }
         }
     }
 
-    fn render_cursor(&self, cursor: Position) -> Result<(), Error> {
+    fn render_cursor(&self) -> Result<(), Error> {
+        let cursor = self.get_cursor_position();
         let mut stdout = io::stdout();
         let (x, y) = (
             cursor.x as isize - self.viewbox.x as isize + self.sidebar_width as isize,

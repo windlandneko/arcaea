@@ -1,6 +1,6 @@
 use crossterm::{
     cursor, event, execute, queue,
-    style::{self, ContentStyle, Print, StyledContent},
+    style::{self, ContentStyle, Print, StyledContent, Stylize},
     terminal,
 };
 use std::io::{stdout, Stdout};
@@ -32,7 +32,7 @@ pub struct Terminal {
     pub height: usize,
     pub width: usize,
 
-    pub buffer: Vec<Vec<Pixel>>,
+    buffer: Vec<Vec<Pixel>>,
     last_buffer: Vec<Vec<Pixel>>,
 }
 
@@ -75,7 +75,8 @@ impl Terminal {
             event::DisableBracketedPaste,
             event::DisableMouseCapture,
             terminal::EnableLineWrap,
-            terminal::LeaveAlternateScreen
+            terminal::LeaveAlternateScreen,
+            cursor::Show,
         )?;
         terminal::disable_raw_mode()?;
         Ok(())
@@ -89,28 +90,33 @@ impl Terminal {
         self.last_buffer = vec![vec![Pixel::default(); self.width]; self.height];
     }
 
-    pub fn begin_render(&mut self) -> Result<(), Error> {
-        execute!(self.stdout, terminal::BeginSynchronizedUpdate)?;
-
+    pub fn clear_buffer(&mut self) {
         for row in &mut self.buffer {
             for pixel in row {
                 *pixel = Pixel::default();
             }
         }
+    }
 
+    pub fn begin_render(&mut self) -> Result<(), Error> {
+        execute!(self.stdout, terminal::BeginSynchronizedUpdate)?;
         Ok(())
     }
 
     pub fn end_render(&mut self) -> Result<(), Error> {
         let mut current_style = ContentStyle::default();
-        queue!(self.stdout, cursor::SavePosition, style::ResetColor)?;
+        queue!(
+            self.stdout,
+            cursor::SavePosition,
+            style::ResetColor,
+            style::SetAttribute(style::Attribute::Reset)
+        )?;
 
         for (y, row) in self.buffer.iter().enumerate() {
-            let mut next_char = 0;
             let mut cursor_x = 0;
             queue!(self.stdout, cursor::MoveTo(0, y as u16))?;
             for (x, pixel) in row.iter().enumerate() {
-                if x != next_char {
+                if pixel.content.is_empty() {
                     continue;
                 }
                 let last_pixel = &self.last_buffer[y][x];
@@ -123,13 +129,15 @@ impl Terminal {
                             cursor_x = x;
                         }
                         if pixel.style != current_style {
+                            if pixel.style.attributes != current_style.attributes {
+                                queue!(self.stdout, style::SetAttribute(style::Attribute::Reset))?;
+                            }
                             queue!(self.stdout, style::SetStyle(pixel.style))?;
                             current_style = pixel.style;
                         }
                         queue!(self.stdout, Print(pixel.content.clone()))?;
                         cursor_x += pixel.content.width();
                     }
-                    next_char += pixel.content.width();
                 }
 
                 #[cfg(feature = "debug")]
@@ -138,11 +146,14 @@ impl Terminal {
                         let mut ch = ".";
                         if x != cursor_x {
                             queue!(self.stdout, cursor::MoveTo(x as u16, y as u16))?;
-                            ch = ">";
+                            ch = "@";
                             cursor_x = x;
                         }
                         if pixel.style != current_style {
-                            ch = if ch == ">" { "#" } else { "$" };
+                            ch = if ch == "@" { "#" } else { ">" };
+                            if pixel.style.attributes != current_style.attributes {
+                                ch = "0";
+                            }
                             current_style = pixel.style;
                         }
                         queue!(self.stdout, Print(ch))?;
@@ -150,7 +161,6 @@ impl Terminal {
                     } else {
                         queue!(self.stdout, Print(" "))?;
                     }
-                    next_char += 1;
                 }
             }
         }
@@ -194,5 +204,18 @@ impl Terminal {
             pixel.style = *content.style();
         }
         self.buffer[pos.y][pos.x].content = ch.to_string();
+    }
+
+    pub fn dimmed(&mut self) -> Result<(), Error> {
+        for row in &mut self.buffer {
+            for pixel in row {
+                pixel.style = pixel
+                    .style
+                    .with(crate::style::text_dimmed)
+                    .on(crate::style::background);
+            }
+        }
+        execute!(self.stdout, cursor::Hide)?;
+        Ok(())
     }
 }
