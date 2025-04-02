@@ -27,10 +27,12 @@ impl Default for Pixel {
 }
 
 pub struct Terminal {
-    stdout: Stdout,
+    pub stdout: Stdout,
 
     pub height: usize,
     pub width: usize,
+
+    pub cursor: Option<Position>,
 
     buffer: Vec<Vec<Pixel>>,
     last_buffer: Vec<Vec<Pixel>>,
@@ -49,6 +51,8 @@ impl Terminal {
             stdout: stdout(),
             height: height.into(),
             width: width.into(),
+
+            cursor: None,
 
             buffer: vec![vec![Pixel::default(); width.into()]; height.into()],
             last_buffer: vec![vec![Pixel::default(); width.into()]; height.into()],
@@ -107,7 +111,6 @@ impl Terminal {
         let mut current_style = ContentStyle::default();
         queue!(
             self.stdout,
-            cursor::SavePosition,
             style::ResetColor,
             style::SetAttribute(style::Attribute::Reset)
         )?;
@@ -165,11 +168,13 @@ impl Terminal {
             }
         }
 
-        execute!(
-            self.stdout,
-            cursor::RestorePosition,
-            terminal::EndSynchronizedUpdate
-        )?;
+        if let Some(Position { x, y }) = self.cursor {
+            queue!(self.stdout, cursor::Show, cursor::MoveTo(x as u16, y as u16))?;
+        } else {
+            queue!(self.stdout, cursor::Hide)?;
+        }
+
+        execute!(self.stdout, terminal::EndSynchronizedUpdate)?;
 
         self.last_buffer = self.buffer.clone();
 
@@ -215,7 +220,8 @@ impl Terminal {
                     .on(crate::style::background);
             }
         }
-        execute!(self.stdout, cursor::Hide)?;
+        self.cursor = None;
+
         Ok(())
     }
 }

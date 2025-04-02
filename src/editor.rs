@@ -53,6 +53,7 @@ impl<T: Into<usize>> From<(T, T)> for Position {
 #[derive(Default)]
 pub struct Editor {
     pub filename: Option<String>,
+    is_crlf: bool,
 
     buffer: Vec<Row>,
     status_string: String,
@@ -88,7 +89,12 @@ impl Editor {
         if let Some(name) = filename {
             self.buffer = std::fs::read_to_string(name)?
                 .split('\n')
-                .map(|line| line.strip_suffix('\r').unwrap_or(line))
+                .map(|line| {
+                    if line.ends_with('\r') {
+                        self.is_crlf = true;
+                    }
+                    line.strip_suffix('\r').unwrap_or(line)
+                })
                 .map(Row::from)
                 .collect();
 
@@ -131,20 +137,23 @@ impl Editor {
                     // Keyboard Event
                     Event::Key(event) if event.kind != KeyEventKind::Release => {
                         match (event.modifiers, event.code) {
-                            (KeyModifiers::CONTROL, KeyCode::Char('s')) => self.save_file()?,
+                            (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
+                                self.try_save_file()?;
+                            }
 
                             (_, KeyCode::Esc)
                             | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
                                 match Tui::confirm_exit(self)? {
                                     Some(true) => {
-                                        self.save_file()?;
-                                        break;
+                                        if self.try_save_file()? {
+                                            break;
+                                        }
                                     }
                                     Some(false) => {
                                         break;
                                     }
                                     None => {}
-                                }
+                                };
                             }
 
                             // Select ALL
@@ -768,7 +777,7 @@ impl Editor {
         self.terminal.begin_render()?;
 
         self.render_to_buffer();
-        self.render_cursor()?;
+        self.render_cursor();
 
         self.terminal.end_render()?;
 
@@ -968,9 +977,8 @@ impl Editor {
         }
     }
 
-    fn render_cursor(&self) -> Result<(), Error> {
+    fn render_cursor(&mut self) {
         let cursor = self.get_cursor_position();
-        let mut stdout = io::stdout();
         let (x, y) = (
             cursor.x as isize - self.viewbox.x as isize + self.sidebar_width as isize,
             cursor.y as isize - self.viewbox.y as isize,
@@ -978,12 +986,10 @@ impl Editor {
 
         if x >= 0 && x < self.terminal.width as isize && y >= 0 && y < self.terminal.height as isize
         {
-            queue!(stdout, cursor::MoveTo(x as u16, y as u16), cursor::Show)?;
+            self.terminal.cursor = Some((x as usize, y as usize).into());
         } else {
-            queue!(stdout, cursor::Hide)?;
+            self.terminal.cursor = None;
         }
-
-        Ok(())
     }
 
     fn get_cursor_position(&self) -> Position {
@@ -1129,30 +1135,31 @@ impl Editor {
         Ok(())
     }
 
-    fn save_file(&mut self) -> Result<(), Error> {
+    /// Attempts to save the file. Returns `true` if the file was saved successfully, `false` otherwise.
+    fn try_save_file(&mut self) -> Result<bool, Error> {
         self.update_last_history_state();
 
         if self.filename.is_none() {
-            self.filename = Tui::prompt_filename()?;
+            self.filename = Tui::prompt_filename(self)?;
         }
 
-        if self.filename.is_none() {
-            return Ok(());
+        if let Some(filename) = &self.filename {
+            std::fs::write(
+                filename,
+                self.buffer
+                    .iter()
+                    .map(|line| line.to_string())
+                    .collect::<Vec<_>>()
+                    .join(if self.is_crlf { "\r\n" } else { "\n" }),
+            )?;
+
+            self.dirty = false;
+
+            self.create_history();
+
+            Ok(true)
+        } else {
+            Ok(false)
         }
-
-        std::fs::write(
-            self.filename.clone().unwrap(),
-            self.buffer
-                .iter()
-                .map(|line| line.to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )?;
-        // TODO: Option to save with \r\n
-
-        self.dirty = false;
-
-        self.create_history();
-        Ok(())
     }
 }

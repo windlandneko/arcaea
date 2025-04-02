@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, MouseEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
     style::{Color, Stylize},
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -8,63 +8,171 @@ use crate::{editor::Position, style, Editor, Error, Row, Terminal};
 
 #[derive(Default)]
 pub struct Input {
-    viewbox: Position,
+    pub viewbox: Position,
 
     offset: usize,
     cursor: usize,
-    max_width: usize,
+    pub max_width: usize,
 
-    pub input: Row,
+    pub buffer: Row,
+
+    dragging: bool,
 }
 
 impl Input {
-    pub fn new(viewbox: Position, max_width: usize) -> Self {
-        Self {
-            viewbox,
-            offset: 0,
-            cursor: 0,
-            max_width,
-            input: Row::default(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn event_loop(&mut self) -> Result<(), Error> {
-        loop {
-            if event::poll(std::time::Duration::from_millis(100))? {
-                match event::read()? {
-                    Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
-                        KeyCode::Char(c) => {
-                            self.input
-                                .rope
-                                .push((c.to_string(), c.width().unwrap_or(0)));
-                        }
-                        KeyCode::Esc => {
-                            return Ok(());
-                        }
-                        KeyCode::Enter => {
-                            return Ok(());
-                        }
-
-                        KeyCode::Backspace => {
-                            self.input.rope.pop();
-                        }
-                        _ => {}
-                    },
-
-                    Event::Mouse(_) => {
-                        todo!("Mouse event handling");
-                    }
-
-                    _ => {}
+    pub fn handle_event(&mut self, event: &Event) -> Result<Option<bool>, Error> {
+        match event {
+            Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
+                KeyCode::Esc => {
+                    return Ok(Some(false));
                 }
-            }
+                KeyCode::Enter => {
+                    return Ok(Some(true));
+                }
+
+                KeyCode::Left => {
+                    if event.modifiers.contains(KeyModifiers::CONTROL) {
+                        // Move to the beginning of the word
+                        while self.cursor > 0 && self.buffer.rope[self.cursor - 1].0 == " " {
+                            self.cursor -= 1;
+                        }
+                        while self.cursor > 0 && self.buffer.rope[self.cursor - 1].0 != " " {
+                            self.cursor -= 1;
+                        }
+                    } else if self.cursor > 0 {
+                        self.cursor -= 1;
+                    }
+                }
+                KeyCode::Right => {
+                    if event.modifiers.contains(KeyModifiers::CONTROL) {
+                        while self.cursor < self.buffer.len()
+                            && self.buffer.rope[self.cursor].0 == " "
+                        {
+                            self.cursor += 1;
+                        }
+                        while self.cursor < self.buffer.len()
+                            && self.buffer.rope[self.cursor].0 != " "
+                        {
+                            self.cursor += 1;
+                        }
+                    } else if self.cursor < self.buffer.len() {
+                        self.cursor += 1;
+                    }
+                }
+                KeyCode::Home => {
+                    self.cursor = 0;
+                }
+                KeyCode::End => {
+                    self.cursor = self.buffer.len();
+                }
+
+                KeyCode::Char(char) => {
+                    self.cursor = self.cursor.min(self.buffer.len());
+
+                    self.buffer
+                        .rope
+                        .insert(self.cursor, (char.to_string(), char.width().unwrap_or(0)));
+                    self.cursor += 1;
+                }
+
+                KeyCode::Backspace => {
+                    if self.cursor > 0 {
+                        self.cursor -= 1;
+                        self.buffer.rope.remove(self.cursor);
+                    }
+                }
+                KeyCode::Delete => {
+                    if self.cursor < self.buffer.len() {
+                        self.buffer.rope.remove(self.cursor);
+                    }
+                }
+                _ => {}
+            },
+
+            Event::Mouse(event) => match event.kind {
+                MouseEventKind::Down(MouseButton::Left)
+                | MouseEventKind::Drag(MouseButton::Left) => {
+                    let (x, y) = (event.column as usize, event.row as usize);
+
+                    if self.dragging
+                        || (y == self.viewbox.y
+                            && x >= self.viewbox.x
+                            && x < self.viewbox.x + self.max_width)
+                    {
+                        if matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+                            self.dragging = true;
+                        }
+
+                        let x = (x + self.offset).saturating_sub(self.viewbox.x);
+                        let visual_width = self.buffer.rope.iter().map(|g| g.1).sum::<usize>();
+                        if x > visual_width {
+                            self.cursor = self.buffer.len();
+                        } else {
+                            let mut width = 0;
+                            for (i, cell) in self.buffer.rope.iter().enumerate() {
+                                if width >= x {
+                                    self.cursor = i;
+                                    break;
+                                }
+                                width += cell.1;
+                            }
+                        }
+                    }
+                }
+
+                _ => {
+                    self.dragging = false;
+                }
+            },
+
+            _ => {}
         }
+
+        self.offset = self.offset.clamp(
+            (self.cursor + 1).saturating_sub(self.max_width),
+            self.cursor,
+        );
+
+        Ok(None)
     }
 
     pub fn render(&self, term: &mut Terminal) -> Result<(), Error> {
         term.write(
             self.viewbox,
-            " ".repeat(self.max_width).on(style::background),
+            " ".repeat(self.max_width)
+                .with(style::text_model)
+                .on(style::background)
+                .underlined(),
+        );
+
+        let mut dx = -(self.offset as isize);
+        for (g, w) in self.buffer.rope.iter() {
+            dx += *w as isize;
+            if dx >= self.max_width as isize {
+                break;
+            }
+            if dx >= *w as isize {
+                term.write_char(
+                    (dx as usize + self.viewbox.x - 1, self.viewbox.y).into(),
+                    g.as_str()
+                        .with(style::text_model)
+                        .on(style::background)
+                        .underlined(),
+                );
+            }
+        }
+
+        let visual_width: usize = self.buffer.rope.iter().take(self.cursor).map(|g| g.1).sum();
+        term.cursor = Some(
+            (
+                (self.viewbox.x + visual_width).saturating_sub(self.offset),
+                self.viewbox.y,
+            )
+                .into(),
         );
 
         Ok(())
@@ -174,11 +282,12 @@ impl Confirm {
 
     pub fn event_loop(&mut self, editor: &mut Editor) -> Result<Option<bool>, Error> {
         if editor.check_minimum_window_size() {
+            editor.render_to_buffer();
             self.render(&mut editor.terminal)?;
         }
 
         loop {
-            if event::poll(std::time::Duration::from_millis(100))? {
+            if event::poll(std::time::Duration::from_millis(25))? {
                 match event::read()? {
                     Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
@@ -304,6 +413,130 @@ impl Confirm {
     }
 }
 
+struct Prompt {
+    title: String,
+    input: Input,
+    yes: Button,
+    no: Button,
+}
+
+impl Prompt {
+    pub fn new(title: String, yes: String, no: String) -> Self {
+        let yes = Button::new(yes, style::text_model_primary, Some("Yes".to_string()));
+        let no = Button::new(no, style::text_model, Some("No".to_string()));
+        let mut input = Input::new();
+        input.max_width = 256;
+        Self {
+            title,
+            input,
+            yes,
+            no,
+        }
+    }
+
+    pub fn event_loop(&mut self, editor: &mut Editor) -> Result<Option<String>, Error> {
+        if editor.check_minimum_window_size() {
+            editor.render_to_buffer();
+            self.render(&mut editor.terminal)?;
+        }
+
+        loop {
+            if event::poll(std::time::Duration::from_millis(25))? {
+                let event = event::read()?;
+                match self.input.handle_event(&event)? {
+                    Some(true) => {
+                        if !self.input.buffer.is_empty() {
+                            return Ok(Some(self.input.buffer.to_string()));
+                        }
+                    }
+                    Some(false) => {
+                        return Ok(None);
+                    }
+                    None => {
+                        if let Event::Mouse(event) = event {
+                            self.yes.hover = false;
+                            self.no.hover = false;
+
+                            let mouse = (event.column as usize, event.row as usize);
+
+                            let (w, h) =
+                                ((self.title.width() + 16).min(editor.terminal.width - 5), 8);
+                            let (x, y) = (
+                                (editor.terminal.width - w) / 2,
+                                (editor.terminal.height - 2 - h) / 2,
+                            );
+
+                            let buttons_offset = self.yes.width + self.no.width + 10;
+                            let mut offset = (x + w - buttons_offset, y + h - 2);
+                            if !self.input.buffer.is_empty() {
+                                self.yes.intersect(offset, mouse);
+                            }
+                            offset.0 += self.yes.width + 5;
+                            self.no.intersect(offset, mouse);
+
+                            if let MouseEventKind::Down(_) = event.kind {
+                                if self.yes.hover {
+                                    return Ok(Some(self.input.buffer.to_string()));
+                                } else if self.no.hover {
+                                    return Ok(None);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !editor.check_minimum_window_size() {
+                continue;
+            }
+
+            editor.render_to_buffer();
+            self.render(&mut editor.terminal)?;
+        }
+    }
+
+    pub fn render(&mut self, term: &mut Terminal) -> Result<(), Error> {
+        term.dimmed()?;
+
+        let (w, h) = ((self.title.width() + 16).min(term.width - 5), 8);
+        let (x, y) = ((term.width - w) / 2, (term.height - 2 - h) / 2);
+
+        term.begin_render()?;
+
+        draw_rounded_rect(term, (x, y), (w, h), style::text_model, style::background);
+
+        term.write(
+            (x + 3, y).into(),
+            " PROMPT "
+                .to_string()
+                .bold()
+                .with(style::text_primary)
+                .on(style::text_model),
+        );
+        term.write(
+            (x + 3, y + 2).into(),
+            self.title
+                .clone()
+                .with(style::text_model)
+                .on(style::background),
+        );
+
+        self.input.viewbox = (x + 3, y + 4).into();
+        self.input.max_width = w - 4;
+        self.input.render(term)?;
+
+        let buttons_offset = self.yes.width + self.no.width + 10;
+        let mut offset = (x + w - buttons_offset, y + h - 2);
+        self.yes.render(term, offset)?;
+        offset.0 += self.yes.width + 5;
+        self.no.render(term, offset)?;
+
+        term.end_render()?;
+
+        Ok(())
+    }
+}
+
 pub struct Tui {}
 
 impl Tui {
@@ -324,35 +557,12 @@ impl Tui {
         .event_loop(editor)
     }
 
-    pub fn prompt_filename() -> Result<Option<String>, Error> {
-        println!("输入文件名: ");
-
-        let mut filename = String::new();
-
-        loop {
-            if event::poll(std::time::Duration::from_millis(100))? {
-                match event::read()? {
-                    Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
-                        KeyCode::Char(c) => {
-                            filename.push(c);
-                        }
-                        KeyCode::Esc => {
-                            return Ok(None);
-                        }
-                        KeyCode::Enter => {
-                            return Ok(Some(filename));
-                        }
-
-                        _ => {}
-                    },
-
-                    Event::Mouse(_) => {
-                        // todo!("Mouse event handling");
-                    }
-
-                    _ => {}
-                }
-            }
-        }
+    pub fn prompt_filename(editor: &mut Editor) -> Result<Option<String>, Error> {
+        Prompt::new(
+            "请输入文件名: ".to_string(),
+            "保存".to_string(),
+            "取消".to_string(),
+        )
+        .event_loop(editor)
     }
 }
