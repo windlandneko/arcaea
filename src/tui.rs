@@ -235,15 +235,15 @@ impl Button {
             self.color,
             style::background,
         );
-        let text = self.text.clone().with(self.color).on(style::background);
-        if self.hover {
-            term.write((x + 2, y + 1).into(), text.underlined());
-        } else {
+        let text = self.text.to_string().with(self.color).on(style::background);
+        if !self.hover {
             term.write((x + 2, y + 1).into(), text);
+        } else {
+            term.write((x + 2, y + 1).into(), text.bold());
             if let Some(ref hint) = self.hint {
                 term.write(
                     (x + 2, y + 2).into(),
-                    hint.clone().with(self.color).on(style::background),
+                    hint.to_string().with(self.color).on(style::background),
                 );
             }
         }
@@ -288,10 +288,10 @@ impl Confirm {
             if event::poll(std::time::Duration::from_millis(25))? {
                 match event::read()? {
                     Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                        KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
                             return Ok(Some(true));
                         }
-                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                        KeyCode::Char('n' | 'N') => {
                             return Ok(Some(false));
                         }
                         KeyCode::Esc => {
@@ -391,7 +391,7 @@ impl Confirm {
         term.write(
             (x + 3, y + 2).into(),
             self.title
-                .clone()
+                .to_string()
                 .with(style::text_model)
                 .on(style::background),
         );
@@ -514,7 +514,7 @@ impl Prompt {
         term.write(
             (x + 3, y + 2).into(),
             self.title
-                .clone()
+                .to_string()
                 .with(style::text_model)
                 .on(style::background),
         );
@@ -528,6 +528,129 @@ impl Prompt {
         self.yes.render(term, offset)?;
         offset.0 += self.yes.width + 5;
         self.no.render(term, offset)?;
+
+        term.end_render()?;
+
+        Ok(())
+    }
+}
+
+struct Alert {
+    title: String,
+    message: String,
+    yes: Button,
+}
+
+impl Alert {
+    pub fn new(title: String, message: String, yes: String) -> Self {
+        let yes = Button::new(yes, style::text_model_primary, Some("Fuck".to_string()));
+        Self {
+            title,
+            message,
+            yes,
+        }
+    }
+
+    pub fn event_loop(&mut self, editor: &mut Editor) -> Result<(), Error> {
+        if editor.check_minimum_window_size() {
+            editor.render_to_buffer();
+            self.render(&mut editor.terminal)?;
+        }
+
+        loop {
+            if event::poll(std::time::Duration::from_millis(25))? {
+                match event::read()? {
+                    Event::Key(event) if event.kind != KeyEventKind::Release => match event.code {
+                        KeyCode::Char('y' | 'Y') | KeyCode::Enter | KeyCode::Esc => {
+                            return Ok(());
+                        }
+
+                        _ => {}
+                    },
+
+                    Event::Mouse(event) => {
+                        self.yes.hover = false;
+
+                        let mouse = (event.column as usize, event.row as usize);
+
+                        let title_width = self.title.width();
+                        let message_width = self.message.width();
+
+                        let (w, h) = (
+                            (message_width.max(title_width) + 12).min(editor.terminal.width - 5),
+                            8,
+                        );
+                        let (x, y) = (
+                            (editor.terminal.width - w) / 2,
+                            (editor.terminal.height - 2 - h) / 2,
+                        );
+
+                        self.yes
+                            .intersect((x + (w - self.yes.width) / 2 - 2, y + h - 2), mouse);
+
+                        if let MouseEventKind::Down(_) = event.kind {
+                            if self.yes.hover {
+                                return Ok(());
+                            }
+                        }
+                    }
+
+                    Event::Resize(width, height) => {
+                        editor.terminal.update_window_size(height, width);
+                    }
+
+                    _ => {}
+                }
+
+                if !editor.check_minimum_window_size() {
+                    continue;
+                }
+
+                editor.render_to_buffer();
+                self.render(&mut editor.terminal)?;
+            }
+        }
+    }
+
+    pub fn render(&self, term: &mut Terminal) -> Result<(), Error> {
+        term.dimmed()?;
+
+        let title_width = self.title.width();
+        let message_width = self.message.width();
+
+        let (w, h) = ((message_width.max(title_width) + 12).min(term.width - 5), 8);
+        let (x, y) = ((term.width - w) / 2, (term.height - 2 - h) / 2);
+
+        term.begin_render()?;
+
+        draw_rounded_rect(term, (x, y), (w, h), style::text_model, style::background);
+
+        term.write(
+            (x + w / 2 - 3, y).into(),
+            " ALERT "
+                .to_string()
+                .bold()
+                .with(style::text_primary)
+                .on(style::text_model),
+        );
+        term.write(
+            (x + (w - title_width) / 2 + 1, y + 2).into(),
+            self.title
+                .to_string()
+                .bold()
+                .with(style::text_alert)
+                .on(style::background),
+        );
+        term.write(
+            (x + (w - message_width) / 2 + 1, y + 4).into(),
+            self.message
+                .to_string()
+                .with(style::text_model)
+                .on(style::background),
+        );
+
+        self.yes
+            .render(term, (x + (w - self.yes.width) / 2 - 1, y + h - 2))?;
 
         term.end_render()?;
 
@@ -562,5 +685,22 @@ impl Tui {
             "取消".to_string(),
         )
         .event_loop(editor)
+    }
+
+    pub fn confirm_overwrite(
+        editor: &mut Editor,
+        filename: &String,
+    ) -> Result<Option<bool>, Error> {
+        Confirm::new(
+            format!("文件 {} 已存在，是否覆盖？", filename),
+            "覆盖".to_string(),
+            "取消".to_string(),
+            None,
+        )
+        .event_loop(editor)
+    }
+
+    pub fn alert(editor: &mut Editor, title: String, message: String) -> Result<(), Error> {
+        Alert::new(title, message, "好吧".to_string()).event_loop(editor)
     }
 }

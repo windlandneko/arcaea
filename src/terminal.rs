@@ -27,7 +27,7 @@ impl Default for Pixel {
 }
 
 pub struct Terminal {
-    pub stdout: Stdout,
+    stdout: Stdout,
 
     pub height: usize,
     pub width: usize,
@@ -127,7 +127,7 @@ impl Terminal {
 
                 #[cfg(not(feature = "debug"))]
                 {
-                    if pixel != last_pixel||true {
+                    if pixel != last_pixel {
                         if x != cursor_x {
                             queue!(self.stdout, cursor::MoveTo(x as u16, y as u16))?;
                             cursor_x = x;
@@ -170,7 +170,11 @@ impl Terminal {
         }
 
         if let Some(Position { x, y }) = self.cursor {
-            queue!(self.stdout, cursor::Show, cursor::MoveTo(x as u16, y as u16))?;
+            queue!(
+                self.stdout,
+                cursor::Show,
+                cursor::MoveTo(x as u16, y as u16)
+            )?;
         }
 
         execute!(self.stdout, terminal::EndSynchronizedUpdate)?;

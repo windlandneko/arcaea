@@ -51,3 +51,74 @@ impl From<ClipboardError> for Error {
         Self::ClipboardError(error.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_unrecognized_option_debug() {
+        let error = Error::UnrecognizedOption("--invalid".to_string());
+        assert_eq!(format!("{:?}", error), "Unrecognized option: --invalid");
+    }
+
+    #[test]
+    fn test_too_many_arguments_debug() {
+        let error = Error::TooManyArguments(3);
+        assert_eq!(
+            format!("{:?}", error),
+            "Too many arguments! (3 arguments provided) This program needs no more than one argument."
+        );
+    }
+
+    #[test]
+    fn test_io_error_debug() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let error = Error::Io(io_error);
+        assert_eq!(format!("{:?}", error), "File IO error: file not found");
+    }
+
+    #[test]
+    fn test_fmt_error_debug() {
+        let fmt_error = std::fmt::Error::default();
+        let error = Error::Fmt(fmt_error);
+        assert_eq!(
+            format!("{:?}", error),
+            "Format error: an error occurred when formatting an argument"
+        );
+    }
+
+    #[test]
+    fn test_clipboard_error_debug() {
+        let error = Error::ClipboardError("clipboard access denied".to_string());
+        assert_eq!(
+            format!("{:?}", error),
+            "Clipboard error: clipboard access denied"
+        );
+    }
+
+    #[test]
+    fn test_file_error_debug() {
+        let path = PathBuf::from("/test/file.txt");
+        let error = Error::FileError(path, 42, "invalid syntax".to_string());
+        assert_eq!(
+            format!("{:?}", error),
+            "File error: /test/file.txt (line 42): invalid syntax"
+        );
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let error: Error = io_error.into();
+        assert!(matches!(error, Error::Io(_)));
+    }
+
+    #[test]
+    fn test_from_fmt_error() {
+        let fmt_error = std::fmt::Error::default();
+        let error: Error = fmt_error.into();
+        assert!(matches!(error, Error::Fmt(_)));
+    }
+}

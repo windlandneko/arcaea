@@ -21,6 +21,7 @@ pub const text_dimmed: Color = rgb!(126, 126, 126);
 pub const text_statusbar: Color = rgb!(255, 255, 255);
 pub const text_sidebar_selected: Color = rgb!(204, 204, 204);
 
+pub const text_alert: Color = Color::Red;
 pub const text_model: Color = rgb!(231, 231, 231);
 pub const text_model_primary: Color = rgb!(0, 120, 212);
 

@@ -145,15 +145,16 @@ impl Editor {
                     // Keyboard Event
                     Event::Key(event) if event.kind != KeyEventKind::Release => {
                         match (event.modifiers, event.code) {
-                            (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
-                                self.try_save_file()?;
+                            (KeyModifiers::CONTROL, KeyCode::Char('s' | 'S'))
+                            | (KeyModifiers::SHIFT, KeyCode::F(12)) => {
+                                self.try_save_file(event.code == KeyCode::F(12))?;
                             }
 
                             (_, KeyCode::Esc)
                             | (KeyModifiers::CONTROL, KeyCode::Char('w' | 'W')) => {
                                 match Tui::confirm_exit(self)? {
                                     Some(true) => {
-                                        if self.try_save_file()? {
+                                        if self.try_save_file(false)? {
                                             break;
                                         }
                                     }
@@ -222,12 +223,12 @@ impl Editor {
 
                             // Paste
                             (KeyModifiers::CONTROL, KeyCode::Char('v' | 'V')) => {
-                                self.trigger_paste()?
+                                self.trigger_paste();
                             }
 
                             // Search
                             (KeyModifiers::CONTROL, KeyCode::Char('f' | 'F')) => {
-                                // self.into_search_mode()?;
+                                self.into_search_mode()?;
                             }
 
                             // Regular character input
@@ -638,7 +639,7 @@ impl Editor {
                                 self.cursor = end;
                                 self.anchor = None;
                             } else {
-                                self.trigger_paste()?;
+                                self.trigger_paste();
                             }
                         }
 
@@ -660,7 +661,10 @@ impl Editor {
             }
 
             if let Some(event) = mouse {
-                if (event.row as usize) < self.terminal.height - 2 || dragging_sidebar {
+                if !(event.kind == MouseEventKind::Down(MouseButton::Left)
+                    && (event.row as usize) >= self.terminal.height - 2)
+                    || dragging_sidebar
+                {
                     self.cursor.y = event.row as usize + self.viewbox.y;
                     let x =
                         (event.column as usize + self.viewbox.x).saturating_sub(self.sidebar_width);
@@ -694,7 +698,7 @@ impl Editor {
                                 .iter()
                                 .map(|g| g.1)
                                 .sum::<usize>();
-                            if x > visual_width {
+                            if x >= visual_width {
                                 self.cursor.x = self.get_width();
                             } else {
                                 let mut width = 0;
@@ -913,6 +917,10 @@ impl Editor {
                 }
             }
         }
+
+        if self.is_searching {
+            self.render_search();
+        }
     }
 
     pub fn check_minimum_window_size(&mut self) -> bool {
@@ -1092,14 +1100,14 @@ impl Editor {
         Ok(())
     }
 
-    fn trigger_paste(&mut self) -> Result<(), Error> {
+    fn trigger_paste(&mut self) {
         self.update_last_history_state();
         self.dirty = true;
 
-        let clipboard = terminal_clipboard::get_string()?;
+        let clipboard = terminal_clipboard::get_string().unwrap_or_default();
 
         if clipboard.is_empty() {
-            return Ok(());
+            return;
         }
 
         if let Some((begin, end)) = self.get_selection() {
@@ -1135,8 +1143,6 @@ impl Editor {
         }
 
         self.create_history();
-
-        Ok(())
     }
 
     fn update_syntax(&mut self) {
@@ -1153,22 +1159,83 @@ impl Editor {
     }
 
     /// Attempts to save the file. Returns `true` if the file was saved successfully, `false` otherwise.
-    fn try_save_file(&mut self) -> Result<bool, Error> {
+    fn try_save_file(&mut self, is_save_as: bool) -> Result<bool, Error> {
         self.update_last_history_state();
 
-        if self.filename.is_none() {
-            self.filename = Tui::prompt_filename(self)?;
+        if is_save_as || self.filename.is_none() {
+            if let Some(ref filename) = Tui::prompt_filename(self)? {
+                if Path::new(filename).is_dir() {
+                    Tui::alert(
+                        self,
+                        "错误".to_string(),
+                        "输入的文件名是一个目录".to_string(),
+                    )?;
+                    return Ok(false);
+                }
+
+                if Path::new(filename).exists() {
+                    if let Some(false) = Tui::confirm_overwrite(self, filename)? {
+                        return Ok(false);
+                    }
+                }
+
+                self.filename = Some(filename.to_string());
+            }
         }
 
-        if let Some(filename) = &self.filename {
-            std::fs::write(
+        if let Some(filename) = self.filename.clone() {
+            if let Err(err) = std::fs::write(
                 filename,
                 self.buffer
                     .iter()
                     .map(|line| line.to_string())
                     .collect::<Vec<_>>()
                     .join(if self.is_crlf { "\r\n" } else { "\n" }),
-            )?;
+            ) {
+                use std::io::ErrorKind::*;
+                let err_message = match err.kind() {
+                    AddrInUse => "地址被占用",
+                    AddrNotAvailable => "地址不可用",
+                    AlreadyExists => "文件已存在",
+                    ArgumentListTooLong => "参数列表过长",
+                    BrokenPipe => "管道已断开",
+                    ConnectionAborted => "连接已中止",
+                    ConnectionRefused => "连接被拒绝",
+                    ConnectionReset => "连接已重置",
+                    CrossesDevices => "不能跨设备进行链接或重命名",
+                    Deadlock => "检测到死锁",
+                    DirectoryNotEmpty => "文件夹不是空的，里面还有东西",
+                    ExecutableFileBusy => "可执行文件正在使用中",
+                    FileTooLarge => "文件太大",
+                    HostUnreachable => "主机不可达",
+                    Interrupted => "操作被中断",
+                    InvalidData => "数据无效",
+                    InvalidInput => "输入参数无效",
+                    IsADirectory => "输入的文件名是一个目录",
+                    NetworkDown => "网络连接已断开",
+                    NetworkUnreachable => "网络不可达",
+                    NotADirectory => "不是一个目录",
+                    NotConnected => "未连接",
+                    NotFound => "未找到文件",
+                    NotSeekable => "文件不支持查找",
+                    Other => "发生未知错误",
+                    OutOfMemory => "内存不足（OOM）",
+                    PermissionDenied => "需要管理员权限",
+                    ReadOnlyFilesystem => "文件系统为只读",
+                    ResourceBusy => "资源正忙",
+                    StaleNetworkFileHandle => "网络文件句柄已失效",
+                    StorageFull => "存储空间不足",
+                    TimedOut => "操作超时",
+                    UnexpectedEof => "遇到意外 EOF 结束符，拼尽全力无法战胜",
+                    _ => &err.to_string(),
+                };
+                Tui::alert(
+                    self,
+                    "保存失败".to_string(),
+                    "错误: ".to_string() + err_message,
+                )?;
+                return Ok(false);
+            }
 
             self.dirty = false;
 
@@ -1182,10 +1249,6 @@ impl Editor {
 
     fn into_search_mode(&mut self) -> Result<(), Error> {
         self.is_searching = true;
-
-        self.search = Input::new();
-        self.search.viewbox = (0, self.terminal.height).into();
-        self.search.max_width = self.terminal.width.saturating_sub(18);
 
         let anchor = self.cursor;
 

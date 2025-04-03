@@ -90,7 +90,6 @@ where
 /// Trim a value (right-hand side of a key=value INI line) and parses it.
 pub fn pv<T: FromStr<Err = E>, E: Display>(value: &str) -> Result<T, String> {
     value
-        .trim()
         .parse()
         .map_err(|e| format!("Parser error: {e}"))
 }
@@ -98,7 +97,7 @@ pub fn pv<T: FromStr<Err = E>, E: Display>(value: &str) -> Result<T, String> {
 /// Split a comma-separated list of values (right-hand side of a
 /// key=value1,value2,... INI line) and parse it as a Vec.
 pub fn pvs<T: FromStr<Err = E>, E: Display>(value: &str) -> Result<Vec<T>, String> {
-    value.split(',').map(pv).collect()
+    value.split(", ").map(pv).collect()
 }
 
 impl Syntax {
@@ -126,12 +125,12 @@ impl Syntax {
         process_ini_file(path, &mut |key, val| {
             match key {
                 "name" => sc.name = pv(val)?,
-                "extensions" => extensions.extend(val.split(',').map(|u| String::from(u.trim()))),
+                "extensions" => extensions.extend(val.split(", ").map(|u| String::from(u))),
                 "highlight_numbers" => sc.highlight_numbers = pv(val)?,
                 "singleline_string_quotes" => sc.sl_string_quotes = pvs(val)?,
                 "singleline_comment_start" => sc.sl_comment_start = pvs(val)?,
                 "multiline_comment_delims" => {
-                    sc.ml_comment_delims = match &val.split(',').collect::<Vec<_>>()[..] {
+                    sc.ml_comment_delims = match &val.split(", ").collect::<Vec<_>>()[..] {
                         [v1, v2] => Some((pv(v1)?, pv(v2)?)),
                         d => return Err(format!("Expected 2 delimiters, got {}", d.len())),
                     }
