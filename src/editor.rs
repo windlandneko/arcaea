@@ -940,7 +940,7 @@ impl Editor {
             let hint_0 = "窗口过小";
             let _ = queue!(
                 stdout,
-                cursor::MoveTo(((w - hint_0.width()) / 2) as u16, (h / 2 - 1) as u16),
+                cursor::MoveTo(((w - hint_0.width()) / 2) as u16, (h / 2).saturating_sub(1) as u16),
                 crossterm::style::Print(hint_0.bold()),
             );
             let hint_1 = format!("Width = {}, Height = {}", w, h);
