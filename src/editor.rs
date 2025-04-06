@@ -1027,7 +1027,8 @@ impl Editor {
         }
     }
 
-    fn get_cursor_position(&self) -> Position {
+    fn get_cursor_position(&mut self) -> Position {
+        self.cursor.y = self.cursor.y.min(self.buffer.len() - 1);
         Position {
             x: self.buffer[self.cursor.y]
                 .rope
