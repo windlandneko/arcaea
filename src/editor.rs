@@ -92,8 +92,20 @@ impl Editor {
     pub fn init(&mut self, filename: &Option<String>) -> Result<(), Error> {
         self.filename = filename.clone();
 
+        self.terminal.init()?;
+
+        self.buffer = vec![Row::from("")];
         if let Some(name) = filename {
-            self.buffer = std::fs::read_to_string(name)?
+            self.buffer = std::fs::read_to_string(name)
+                .unwrap_or_else(|err| {
+                    self.filename = None;
+                    let _ = Tui::alert(
+                        self,
+                        "文件读取失败".to_string(),
+                        Error::get_error_message(&err).to_string(),
+                    );
+                    String::new()
+                })
                 .split('\n')
                 .map(|line| {
                     if line.ends_with('\r') {
@@ -108,20 +120,19 @@ impl Editor {
                 .extension()
                 .and_then(std::ffi::OsStr::to_str);
             if let Some(s) = ext.and_then(|e| Syntax::get(e).transpose()) {
-                self.syntax = s?;
+                self.syntax = s.unwrap_or_else(|err| {
+                    let message = format!("错误: {:?}", err);
+                    let _ = Tui::alert(self, "语法高亮加载失败".to_string(), message);
+                    Syntax::default()
+                });
                 self.update_syntax();
             } else {
                 self.syntax = Syntax::default();
             }
-        } else {
-            self.buffer = Vec::new();
-            self.buffer.push(Row::from(""));
         }
 
         self.history
             .push_state(&self.buffer, self.viewbox, self.cursor, self.anchor);
-
-        self.terminal.init()?;
 
         if self.check_minimum_window_size() {
             self.render()?;
@@ -860,10 +871,6 @@ impl Editor {
                 .on(style::background),
         );
 
-        if self.is_searching {
-            self.render_search();
-        }
-
         self.render_sidebar();
 
         let begin = self.viewbox.y;
@@ -940,7 +947,10 @@ impl Editor {
             let hint_0 = "窗口过小";
             let _ = queue!(
                 stdout,
-                cursor::MoveTo(((w - hint_0.width()) / 2) as u16, (h / 2).saturating_sub(1) as u16),
+                cursor::MoveTo(
+                    ((w - hint_0.width()) / 2) as u16,
+                    (h / 2).saturating_sub(1) as u16
+                ),
                 crossterm::style::Print(hint_0.bold()),
             );
             let hint_1 = format!("Width = {}, Height = {}", w, h);
@@ -994,7 +1004,7 @@ impl Editor {
             } else {
                 self.terminal.write(
                     (0, i).into(),
-                    format!("{:>width$} ", "~", width = self.sidebar_width - 1)
+                    format!("{:>width$} ", " ", width = self.sidebar_width - 1)
                         .with(style::text_dimmed)
                         .on(style::background_sidebar),
                 );
@@ -1192,47 +1202,10 @@ impl Editor {
                     .collect::<Vec<_>>()
                     .join(if self.is_crlf { "\r\n" } else { "\n" }),
             ) {
-                use std::io::ErrorKind::*;
-                let err_message = match err.kind() {
-                    AddrInUse => "地址被占用",
-                    AddrNotAvailable => "地址不可用",
-                    AlreadyExists => "文件已存在",
-                    ArgumentListTooLong => "参数列表过长",
-                    BrokenPipe => "管道已断开",
-                    ConnectionAborted => "连接已中止",
-                    ConnectionRefused => "连接被拒绝",
-                    ConnectionReset => "连接已重置",
-                    CrossesDevices => "不能跨设备进行链接或重命名",
-                    Deadlock => "检测到死锁",
-                    DirectoryNotEmpty => "文件夹不是空的，里面还有东西",
-                    ExecutableFileBusy => "可执行文件正在使用中",
-                    FileTooLarge => "文件太大",
-                    HostUnreachable => "主机不可达",
-                    Interrupted => "操作被中断",
-                    InvalidData => "数据无效",
-                    InvalidInput => "输入参数无效",
-                    IsADirectory => "输入的文件名是一个目录",
-                    NetworkDown => "网络连接已断开",
-                    NetworkUnreachable => "网络不可达",
-                    NotADirectory => "不是一个目录",
-                    NotConnected => "未连接",
-                    NotFound => "未找到文件",
-                    NotSeekable => "文件不支持查找",
-                    Other => "发生未知错误",
-                    OutOfMemory => "内存不足（OOM）",
-                    PermissionDenied => "需要管理员权限",
-                    ReadOnlyFilesystem => "文件系统为只读",
-                    ResourceBusy => "资源正忙",
-                    StaleNetworkFileHandle => "网络文件句柄已失效",
-                    StorageFull => "存储空间不足",
-                    TimedOut => "操作超时",
-                    UnexpectedEof => "遇到意外 EOF 结束符，拼尽全力无法战胜",
-                    _ => &err.to_string(),
-                };
                 Tui::alert(
                     self,
                     "保存失败".to_string(),
-                    "错误: ".to_string() + err_message,
+                    "错误: ".to_string() + Error::get_error_message(&err),
                 )?;
                 return Ok(false);
             }

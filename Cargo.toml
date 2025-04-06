@@ -17,6 +17,7 @@ terminal-clipboard = "0.4.1"
 tempfile = "3.19.1"
 
 [features]
+# default = ["debug"]
 debug = []
 
 [profile.release]

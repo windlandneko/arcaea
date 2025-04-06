@@ -52,6 +52,48 @@ impl From<ClipboardError> for Error {
     }
 }
 
+impl Error {
+    pub fn get_error_message(err: &std::io::Error) -> &str {
+        use std::io::ErrorKind::*;
+        match err.kind() {
+            AddrInUse => "地址被占用",
+            AddrNotAvailable => "地址不可用",
+            AlreadyExists => "文件已存在",
+            ArgumentListTooLong => "参数列表过长",
+            BrokenPipe => "管道已断开",
+            ConnectionAborted => "连接已中止",
+            ConnectionRefused => "连接被拒绝",
+            ConnectionReset => "连接已重置",
+            CrossesDevices => "不能跨设备进行链接或重命名",
+            Deadlock => "检测到死锁",
+            DirectoryNotEmpty => "文件夹不是空的，里面还有东西",
+            ExecutableFileBusy => "可执行文件正在使用中",
+            FileTooLarge => "文件太大",
+            HostUnreachable => "主机不可达",
+            Interrupted => "操作被中断",
+            InvalidData => "数据无效",
+            InvalidInput => "输入参数无效",
+            IsADirectory => "该路径是一个目录",
+            NetworkDown => "网络连接已断开",
+            NetworkUnreachable => "网络不可达",
+            NotADirectory => "不是一个目录",
+            NotConnected => "未连接",
+            NotFound => "未找到文件",
+            NotSeekable => "文件不支持查找",
+            Other => "发生未知错误",
+            OutOfMemory => "内存不足（OOM）",
+            PermissionDenied => "需要管理员权限",
+            ReadOnlyFilesystem => "文件系统为只读",
+            ResourceBusy => "资源正忙",
+            StaleNetworkFileHandle => "网络文件句柄已失效",
+            StorageFull => "存储空间不足",
+            TimedOut => "操作超时",
+            UnexpectedEof => "遇到意外 EOF 结束符，拼尽全力无法战胜",
+            _ => "未知错误",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
