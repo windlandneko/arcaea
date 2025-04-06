@@ -239,7 +239,7 @@ impl Editor {
 
                             // Search
                             (KeyModifiers::CONTROL, KeyCode::Char('f' | 'F')) => {
-                                self.into_search_mode()?;
+                                self.toggle_search_mode()?;
                             }
 
                             // Regular character input
@@ -1221,10 +1221,10 @@ impl Editor {
         }
     }
 
-    fn into_search_mode(&mut self) -> Result<(), Error> {
+    fn toggle_search_mode(&mut self) -> Result<(), Error> {
         self.is_searching = true;
 
-        let anchor = self.cursor;
+        // let anchor = self.cursor;
 
         if self.check_minimum_window_size() {
             self.render_to_buffer();
@@ -1233,7 +1233,7 @@ impl Editor {
         let mut last_input = String::new();
         loop {
             if event::poll(std::time::Duration::from_millis(25))? {
-                let event = event::read()?;
+                // let event = event::read()?;
                 // match self.search.handle_event(&event)? {
                 //     Some(true) => {}
                 //     Some(false) => {

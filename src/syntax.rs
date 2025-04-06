@@ -125,7 +125,7 @@ impl Syntax {
         process_ini_file(path, &mut |key, val| {
             match key {
                 "name" => sc.name = pv(val)?,
-                "extensions" => extensions.extend(val.split(", ").map(|u| String::from(u))),
+                "extensions" => extensions.extend(val.split(", ").map(String::from)),
                 "highlight_numbers" => sc.highlight_numbers = pv(val)?,
                 "singleline_string_quotes" => sc.sl_string_quotes = pvs(val)?,
                 "singleline_comment_start" => sc.sl_comment_start = pvs(val)?,
